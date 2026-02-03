@@ -1,15 +1,17 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { GameRow } from "../lib/types";
-import { Button, Card, CardHeader, Input } from "../components/ui";
+import { GameRow, PackRow } from "../lib/types";
+import { Button, Card, CardHeader, Input, Select } from "../components/ui";
 
 const schema = z.object({
   name: z.string().min(1),
-  notes: z.string().optional().nullable()
+  notes: z.string().optional().nullable(),
+  packId: z.coerce.number().int()
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -17,8 +19,18 @@ type FormValues = z.infer<typeof schema>;
 export default function Games() {
   const queryClient = useQueryClient();
   const { data: games = [] } = useQuery<GameRow[]>({ queryKey: ["games"], queryFn: () => api.get("/games") });
+  const { data: packs = [] } = useQuery<PackRow[]>({ queryKey: ["packs"], queryFn: () => api.get("/packs") });
 
-  const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: { name: "", notes: "" } });
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { name: "", notes: "", packId: packs[0]?.id ?? 0 }
+  });
+
+  useEffect(() => {
+    if (packs.length > 0) {
+      form.setValue("packId", packs[0].id);
+    }
+  }, [packs, form]);
 
   const create = useMutation({
     mutationFn: (payload: FormValues) => api.post("/games", payload),
@@ -31,10 +43,17 @@ export default function Games() {
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
-        <CardHeader title="Create Game" subtitle="Profiles define allowed species, abilities, items." />
+        <CardHeader title="Create Game" subtitle="Choose a base pack for this game." />
         <form className="space-y-3" onSubmit={form.handleSubmit((values) => create.mutate(values))}>
           <Input placeholder="Game name" {...form.register("name")} />
           <Input placeholder="Notes / rules" {...form.register("notes")} />
+          <Select {...form.register("packId")}>
+            {packs.map((pack) => (
+              <option key={pack.id} value={pack.id}>
+                {pack.name}
+              </option>
+            ))}
+          </Select>
           <Button type="submit">Create</Button>
         </form>
       </Card>

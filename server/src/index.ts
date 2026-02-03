@@ -1,22 +1,27 @@
 import express from "express";
 import cors from "cors";
-import { and, eq, inArray, like, gte, or } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { and, eq, inArray, like } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { db } from "./db/index.js";
 import {
-  abilities,
-  boxPokemon,
+  packs,
+  packTypes,
+  packTypeEffectiveness,
+  packSpecies,
+  packAbilities,
+  packItems,
+  packSpeciesAbilities,
+  games,
+  gameSpecies,
   gameAbilities,
   gameItems,
-  gameSpecies,
-  games,
-  items,
-  species,
+  gameSpeciesOverrides,
+  gameSpeciesAbilities,
+  boxPokemon,
   teamSlots,
-  typeEffectiveness,
-  types
+  settings
 } from "./db/schema.js";
 import { seedIfEmpty } from "./db/seed.js";
 import { computePotentials, computeTeamChart, parseTags } from "./scoring.js";
@@ -26,17 +31,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const primaryMigrations = resolve(process.cwd(), "server", "drizzle");
-const fallbackMigrations = resolve(process.cwd(), "drizzle");
-try {
-  migrate(db, { migrationsFolder: primaryMigrations });
-} catch {
-  migrate(db, { migrationsFolder: fallbackMigrations });
-}
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const migrationsFolder = resolve(__dirname, "..", "drizzle");
+migrate(db, { migrationsFolder });
 
 await seedIfEmpty();
 
 const idSchema = z.coerce.number().int().positive();
+
+const packSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional().nullable()
+});
 
 const typeSchema = z.object({
   name: z.string().min(1),
@@ -66,9 +72,20 @@ const tagSchema = z.object({
   tags: z.array(z.string()).default([])
 });
 
+const speciesAbilitiesSchema = z.object({
+  speciesId: idSchema,
+  slots: z.array(
+    z.object({
+      abilityId: idSchema,
+      slot: z.enum(["1", "2", "H"])
+    })
+  )
+});
+
 const gameSchema = z.object({
   name: z.string().min(1),
-  notes: z.string().optional().nullable()
+  notes: z.string().optional().nullable(),
+  packId: idSchema
 });
 
 const allowedSchema = z.object({
@@ -92,173 +109,266 @@ const teamSchema = z.object({
   )
 });
 
-const type1 = alias(types, "type1");
-const type2 = alias(types, "type2");
+async function getPackTypesMap(packId: number) {
+  const typesList = await db.select().from(packTypes).where(eq(packTypes.packId, packId));
+  const map = new Map(typesList.map((t) => [t.id, t.name]));
+  return { typesList, typeNameById: map };
+}
 
-app.get("/api/types", async (_req, res) => {
-  const rows = await db.select().from(types).orderBy(types.name);
+function applySpeciesOverride(base: any, override: any | null) {
+  return {
+    ...base,
+    type1Id: override?.type1Id ?? base.type1Id,
+    type2Id: override?.type2Id ?? base.type2Id,
+    hp: override?.hp ?? base.hp,
+    atk: override?.atk ?? base.atk,
+    def: override?.def ?? base.def,
+    spa: override?.spa ?? base.spa,
+    spd: override?.spd ?? base.spd,
+    spe: override?.spe ?? base.spe
+  };
+}
+
+// Packs
+app.get("/api/packs", async (_req, res) => {
+  const rows = await db.select().from(packs).orderBy(packs.name);
   res.json(rows);
 });
 
-app.post("/api/types", async (req, res) => {
-  const data = typeSchema.parse(req.body);
-  const [row] = await db.insert(types).values({ name: data.name, metadata: data.metadata ?? null }).returning();
+app.post("/api/packs", async (req, res) => {
+  const data = packSchema.parse(req.body);
+  const [row] = await db.insert(packs).values({ name: data.name, description: data.description ?? null }).returning();
   res.json(row);
 });
 
-app.put("/api/types/:id", async (req, res) => {
+app.put("/api/packs/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  const data = typeSchema.parse(req.body);
+  const data = packSchema.parse(req.body);
   const [row] = await db
-    .update(types)
-    .set({ name: data.name, metadata: data.metadata ?? null })
-    .where(eq(types.id, id))
+    .update(packs)
+    .set({ name: data.name, description: data.description ?? null })
+    .where(eq(packs.id, id))
     .returning();
   res.json(row);
 });
 
-app.delete("/api/types/:id", async (req, res) => {
+app.delete("/api/packs/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  await db.delete(types).where(eq(types.id, id));
+  await db.delete(packs).where(eq(packs.id, id));
   res.json({ ok: true });
 });
 
-app.get("/api/typechart", async (_req, res) => {
-  const rows = await db.select().from(typeEffectiveness);
+// Pack Types & Chart
+app.get("/api/packs/:id/types", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(packTypes).where(eq(packTypes.packId, packId)).orderBy(packTypes.name);
   res.json(rows);
 });
 
-app.post("/api/typechart", async (req, res) => {
+app.post("/api/packs/:id/types", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const data = typeSchema.parse(req.body);
+  const [row] = await db
+    .insert(packTypes)
+    .values({ packId, name: data.name, metadata: data.metadata ?? null })
+    .returning();
+  res.json(row);
+});
+
+app.put("/api/packs/:id/types/:typeId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const typeId = idSchema.parse(req.params.typeId);
+  const data = typeSchema.parse(req.body);
+  const [row] = await db
+    .update(packTypes)
+    .set({ name: data.name, metadata: data.metadata ?? null })
+    .where(and(eq(packTypes.id, typeId), eq(packTypes.packId, packId)))
+    .returning();
+  res.json(row);
+});
+
+app.delete("/api/packs/:id/types/:typeId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const typeId = idSchema.parse(req.params.typeId);
+  await db.delete(packTypes).where(and(eq(packTypes.id, typeId), eq(packTypes.packId, packId)));
+  res.json({ ok: true });
+});
+
+app.get("/api/packs/:id/typechart", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
+  res.json(rows);
+});
+
+app.post("/api/packs/:id/typechart", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
   const data = typeChartSchema.parse(req.body);
   await db
-    .insert(typeEffectiveness)
-    .values(data)
+    .insert(packTypeEffectiveness)
+    .values({ ...data, packId })
     .onConflictDoUpdate({
-      target: [typeEffectiveness.attackingTypeId, typeEffectiveness.defendingTypeId],
+      target: [packTypeEffectiveness.packId, packTypeEffectiveness.attackingTypeId, packTypeEffectiveness.defendingTypeId],
       set: { multiplier: data.multiplier }
     });
   res.json({ ok: true });
 });
 
-app.get("/api/species", async (_req, res) => {
-  const rows = await db
-    .select({
-      id: species.id,
-      name: species.name,
-      type1Id: species.type1Id,
-      type2Id: species.type2Id,
-      hp: species.hp,
-      atk: species.atk,
-      def: species.def,
-      spa: species.spa,
-      spd: species.spd,
-      spe: species.spe,
-      type1Name: type1.name,
-      type2Name: type2.name
-    })
-    .from(species)
-    .leftJoin(type1, eq(species.type1Id, type1.id))
-    .leftJoin(type2, eq(species.type2Id, type2.id))
-    .orderBy(species.name);
-  res.json(rows);
+// Pack Species
+app.get("/api/packs/:id/species", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const { typesList, typeNameById } = await getPackTypesMap(packId);
+
+  const rows = await db.select().from(packSpecies).where(eq(packSpecies.packId, packId)).orderBy(packSpecies.name);
+
+  const withNames = rows.map((row) => ({
+    ...row,
+    type1Name: typeNameById.get(row.type1Id) ?? null,
+    type2Name: row.type2Id ? typeNameById.get(row.type2Id) ?? null : null
+  }));
+
+  res.json(withNames);
 });
 
-app.post("/api/species", async (req, res) => {
+app.post("/api/packs/:id/species", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
   const data = speciesSchema.parse(req.body);
-  const [row] = await db.insert(species).values({
-    ...data,
-    type2Id: data.type2Id ?? null
-  }).returning();
+  const [row] = await db
+    .insert(packSpecies)
+    .values({ ...data, packId, type2Id: data.type2Id ?? null })
+    .returning();
   res.json(row);
 });
 
-app.put("/api/species/:id", async (req, res) => {
-  const id = idSchema.parse(req.params.id);
+app.put("/api/packs/:id/species/:speciesId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const speciesId = idSchema.parse(req.params.speciesId);
   const data = speciesSchema.parse(req.body);
   const [row] = await db
-    .update(species)
+    .update(packSpecies)
     .set({ ...data, type2Id: data.type2Id ?? null })
-    .where(eq(species.id, id))
+    .where(and(eq(packSpecies.id, speciesId), eq(packSpecies.packId, packId)))
     .returning();
   res.json(row);
 });
 
-app.delete("/api/species/:id", async (req, res) => {
-  const id = idSchema.parse(req.params.id);
-  await db.delete(species).where(eq(species.id, id));
+app.delete("/api/packs/:id/species/:speciesId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const speciesId = idSchema.parse(req.params.speciesId);
+  await db.delete(packSpecies).where(and(eq(packSpecies.id, speciesId), eq(packSpecies.packId, packId)));
   res.json({ ok: true });
 });
 
-app.get("/api/abilities", async (_req, res) => {
-  const rows = await db.select().from(abilities).orderBy(abilities.name);
+// Pack Abilities
+app.get("/api/packs/:id/abilities", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(packAbilities).where(eq(packAbilities.packId, packId)).orderBy(packAbilities.name);
   res.json(rows);
 });
 
-app.post("/api/abilities", async (req, res) => {
+app.post("/api/packs/:id/abilities", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
   const data = tagSchema.parse(req.body);
   const [row] = await db
-    .insert(abilities)
-    .values({ name: data.name, tags: JSON.stringify(data.tags ?? []) })
+    .insert(packAbilities)
+    .values({ packId, name: data.name, tags: JSON.stringify(data.tags ?? []) })
     .returning();
   res.json(row);
 });
 
-app.put("/api/abilities/:id", async (req, res) => {
-  const id = idSchema.parse(req.params.id);
+app.put("/api/packs/:id/abilities/:abilityId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const abilityId = idSchema.parse(req.params.abilityId);
   const data = tagSchema.parse(req.body);
   const [row] = await db
-    .update(abilities)
+    .update(packAbilities)
     .set({ name: data.name, tags: JSON.stringify(data.tags ?? []) })
-    .where(eq(abilities.id, id))
+    .where(and(eq(packAbilities.id, abilityId), eq(packAbilities.packId, packId)))
     .returning();
   res.json(row);
 });
 
-app.delete("/api/abilities/:id", async (req, res) => {
-  const id = idSchema.parse(req.params.id);
-  await db.delete(abilities).where(eq(abilities.id, id));
+app.delete("/api/packs/:id/abilities/:abilityId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const abilityId = idSchema.parse(req.params.abilityId);
+  await db.delete(packAbilities).where(and(eq(packAbilities.id, abilityId), eq(packAbilities.packId, packId)));
   res.json({ ok: true });
 });
 
-app.get("/api/items", async (_req, res) => {
-  const rows = await db.select().from(items).orderBy(items.name);
+// Pack Items
+app.get("/api/packs/:id/items", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(packItems).where(eq(packItems.packId, packId)).orderBy(packItems.name);
   res.json(rows);
 });
 
-app.post("/api/items", async (req, res) => {
+app.post("/api/packs/:id/items", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
   const data = tagSchema.parse(req.body);
   const [row] = await db
-    .insert(items)
-    .values({ name: data.name, tags: JSON.stringify(data.tags ?? []) })
+    .insert(packItems)
+    .values({ packId, name: data.name, tags: JSON.stringify(data.tags ?? []) })
     .returning();
   res.json(row);
 });
 
-app.put("/api/items/:id", async (req, res) => {
-  const id = idSchema.parse(req.params.id);
+app.put("/api/packs/:id/items/:itemId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const itemId = idSchema.parse(req.params.itemId);
   const data = tagSchema.parse(req.body);
   const [row] = await db
-    .update(items)
+    .update(packItems)
     .set({ name: data.name, tags: JSON.stringify(data.tags ?? []) })
-    .where(eq(items.id, id))
+    .where(and(eq(packItems.id, itemId), eq(packItems.packId, packId)))
     .returning();
   res.json(row);
 });
 
-app.delete("/api/items/:id", async (req, res) => {
-  const id = idSchema.parse(req.params.id);
-  await db.delete(items).where(eq(items.id, id));
+app.delete("/api/packs/:id/items/:itemId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const itemId = idSchema.parse(req.params.itemId);
+  await db.delete(packItems).where(and(eq(packItems.id, itemId), eq(packItems.packId, packId)));
   res.json({ ok: true });
 });
 
+// Pack Species Abilities
+app.get("/api/packs/:id/species-abilities", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(packSpeciesAbilities).where(eq(packSpeciesAbilities.packId, packId));
+  res.json(rows);
+});
+
+app.post("/api/packs/:id/species-abilities", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const data = speciesAbilitiesSchema.parse(req.body);
+  await db.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.speciesId, data.speciesId)));
+  if (data.slots.length > 0) {
+    await db.insert(packSpeciesAbilities).values(
+      data.slots.map((slot) => ({
+        packId,
+        speciesId: data.speciesId,
+        abilityId: slot.abilityId,
+        slot: slot.slot
+      }))
+    );
+  }
+  res.json({ ok: true });
+});
+
+// Games
 app.get("/api/games", async (_req, res) => {
   const rows = await db.select().from(games).orderBy(games.name);
   res.json(rows);
 });
 
+app.get("/api/games/:id", async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const [row] = await db.select().from(games).where(eq(games.id, id));
+  res.json(row ?? null);
+});
+
 app.post("/api/games", async (req, res) => {
   const data = gameSchema.parse(req.body);
-  const [row] = await db.insert(games).values({ name: data.name, notes: data.notes ?? null }).returning();
+  const [row] = await db.insert(games).values({ name: data.name, notes: data.notes ?? null, packId: data.packId }).returning();
   res.json(row);
 });
 
@@ -267,7 +377,7 @@ app.put("/api/games/:id", async (req, res) => {
   const data = gameSchema.parse(req.body);
   const [row] = await db
     .update(games)
-    .set({ name: data.name, notes: data.notes ?? null })
+    .set({ name: data.name, notes: data.notes ?? null, packId: data.packId })
     .where(eq(games.id, id))
     .returning();
   res.json(row);
@@ -333,52 +443,86 @@ app.get("/api/games/:id/dex", async (req, res) => {
   const typeId = typeof req.query.typeId === "string" ? Number(req.query.typeId) : null;
   const statMin = (key: string) => (typeof req.query[key] === "string" ? Number(req.query[key]) : null);
 
-  const conditions = [eq(gameSpecies.gameId, gameId)];
-  if (search) conditions.push(like(species.name, `%${search}%`));
-  if (typeId) conditions.push(or(eq(species.type1Id, typeId), eq(species.type2Id, typeId)));
-  const minHp = statMin("minHp");
-  if (minHp) conditions.push(gte(species.hp, minHp));
-  const minAtk = statMin("minAtk");
-  if (minAtk) conditions.push(gte(species.atk, minAtk));
-  const minDef = statMin("minDef");
-  if (minDef) conditions.push(gte(species.def, minDef));
-  const minSpa = statMin("minSpa");
-  if (minSpa) conditions.push(gte(species.spa, minSpa));
-  const minSpd = statMin("minSpd");
-  if (minSpd) conditions.push(gte(species.spd, minSpd));
-  const minSpe = statMin("minSpe");
-  if (minSpe) conditions.push(gte(species.spe, minSpe));
+  const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
+  if (game.length === 0) return res.status(404).json({ error: "Game not found" });
+  const packId = game[0].packId;
+
+  const { typesList, typeNameById } = await getPackTypesMap(packId);
 
   const rows = await db
     .select({
-      id: species.id,
-      name: species.name,
-      type1Id: species.type1Id,
-      type2Id: species.type2Id,
-      hp: species.hp,
-      atk: species.atk,
-      def: species.def,
-      spa: species.spa,
-      spd: species.spd,
-      spe: species.spe,
-      type1Name: type1.name,
-      type2Name: type2.name
+      speciesId: packSpecies.id,
+      name: packSpecies.name,
+      type1Id: packSpecies.type1Id,
+      type2Id: packSpecies.type2Id,
+      hp: packSpecies.hp,
+      atk: packSpecies.atk,
+      def: packSpecies.def,
+      spa: packSpecies.spa,
+      spd: packSpecies.spd,
+      spe: packSpecies.spe,
+      oType1Id: gameSpeciesOverrides.type1Id,
+      oType2Id: gameSpeciesOverrides.type2Id,
+      oHp: gameSpeciesOverrides.hp,
+      oAtk: gameSpeciesOverrides.atk,
+      oDef: gameSpeciesOverrides.def,
+      oSpa: gameSpeciesOverrides.spa,
+      oSpd: gameSpeciesOverrides.spd,
+      oSpe: gameSpeciesOverrides.spe
     })
     .from(gameSpecies)
-    .innerJoin(species, eq(gameSpecies.speciesId, species.id))
-    .leftJoin(type1, eq(species.type1Id, type1.id))
-    .leftJoin(type2, eq(species.type2Id, type2.id))
-    .where(and(...conditions))
-    .orderBy(species.name);
+    .innerJoin(packSpecies, eq(gameSpecies.speciesId, packSpecies.id))
+    .leftJoin(
+      gameSpeciesOverrides,
+      and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
+    )
+    .where(eq(gameSpecies.gameId, gameId))
+    .orderBy(packSpecies.name);
 
-  res.json(rows);
+  const normalized = rows
+    .map((row) => applySpeciesOverride(row, {
+      type1Id: row.oType1Id,
+      type2Id: row.oType2Id,
+      hp: row.oHp,
+      atk: row.oAtk,
+      def: row.oDef,
+      spa: row.oSpa,
+      spd: row.oSpd,
+      spe: row.oSpe
+    }))
+    .map((row) => ({
+      id: row.speciesId,
+      name: row.name,
+      type1Id: row.type1Id,
+      type2Id: row.type2Id,
+      hp: row.hp,
+      atk: row.atk,
+      def: row.def,
+      spa: row.spa,
+      spd: row.spd,
+      spe: row.spe,
+      type1Name: typeNameById.get(row.type1Id) ?? null,
+      type2Name: row.type2Id ? typeNameById.get(row.type2Id) ?? null : null
+    }))
+    .filter((row) => (search ? row.name.toLowerCase().includes(search.toLowerCase()) : true))
+    .filter((row) => (typeId ? row.type1Id === typeId || row.type2Id === typeId : true))
+    .filter((row) => (statMin("minHp") ? row.hp >= statMin("minHp")! : true))
+    .filter((row) => (statMin("minAtk") ? row.atk >= statMin("minAtk")! : true))
+    .filter((row) => (statMin("minDef") ? row.def >= statMin("minDef")! : true))
+    .filter((row) => (statMin("minSpa") ? row.spa >= statMin("minSpa")! : true))
+    .filter((row) => (statMin("minSpd") ? row.spd >= statMin("minSpd")! : true))
+    .filter((row) => (statMin("minSpe") ? row.spe >= statMin("minSpe")! : true));
+
+  res.json(normalized);
 });
 
 app.get("/api/games/:id/box", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
+  const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
+  if (game.length === 0) return res.status(404).json({ error: "Game not found" });
+  const packId = game[0].packId;
 
-  const ability = alias(abilities, "ability");
-  const item = alias(items, "item");
+  const { typeNameById } = await getPackTypesMap(packId);
 
   const rows = await db
     .select({
@@ -389,44 +533,77 @@ app.get("/api/games/:id/box", async (req, res) => {
       itemId: boxPokemon.itemId,
       nickname: boxPokemon.nickname,
       notes: boxPokemon.notes,
-      speciesName: species.name,
-      type1Id: species.type1Id,
-      type2Id: species.type2Id,
-      hp: species.hp,
-      atk: species.atk,
-      def: species.def,
-      spa: species.spa,
-      spd: species.spd,
-      spe: species.spe,
-      abilityName: ability.name,
-      abilityTags: ability.tags,
-      itemName: item.name,
-      itemTags: item.tags
+      speciesName: packSpecies.name,
+      type1Id: packSpecies.type1Id,
+      type2Id: packSpecies.type2Id,
+      hp: packSpecies.hp,
+      atk: packSpecies.atk,
+      def: packSpecies.def,
+      spa: packSpecies.spa,
+      spd: packSpecies.spd,
+      spe: packSpecies.spe,
+      oType1Id: gameSpeciesOverrides.type1Id,
+      oType2Id: gameSpeciesOverrides.type2Id,
+      oHp: gameSpeciesOverrides.hp,
+      oAtk: gameSpeciesOverrides.atk,
+      oDef: gameSpeciesOverrides.def,
+      oSpa: gameSpeciesOverrides.spa,
+      oSpd: gameSpeciesOverrides.spd,
+      oSpe: gameSpeciesOverrides.spe,
+      abilityName: packAbilities.name,
+      abilityTags: packAbilities.tags,
+      itemName: packItems.name,
+      itemTags: packItems.tags
     })
     .from(boxPokemon)
-    .innerJoin(species, eq(boxPokemon.speciesId, species.id))
-    .leftJoin(ability, eq(boxPokemon.abilityId, ability.id))
-    .leftJoin(item, eq(boxPokemon.itemId, item.id))
+    .innerJoin(packSpecies, eq(boxPokemon.speciesId, packSpecies.id))
+    .leftJoin(
+      gameSpeciesOverrides,
+      and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
+    )
+    .leftJoin(packAbilities, eq(boxPokemon.abilityId, packAbilities.id))
+    .leftJoin(packItems, eq(boxPokemon.itemId, packItems.id))
     .where(eq(boxPokemon.gameId, gameId))
-    .orderBy(species.name);
+    .orderBy(packSpecies.name);
 
   const withScores = await Promise.all(
     rows.map(async (row) => {
+      const effective = applySpeciesOverride(row, {
+        type1Id: row.oType1Id,
+        type2Id: row.oType2Id,
+        hp: row.oHp,
+        atk: row.oAtk,
+        def: row.oDef,
+        spa: row.oSpa,
+        spd: row.oSpd,
+        spe: row.oSpe
+      });
+
       const tags = [...parseTags(row.abilityTags), ...parseTags(row.itemTags)];
       const potentials = await computePotentials(
         {
-          hp: row.hp,
-          atk: row.atk,
-          def: row.def,
-          spa: row.spa,
-          spd: row.spd,
-          spe: row.spe
+          hp: effective.hp,
+          atk: effective.atk,
+          def: effective.def,
+          spa: effective.spa,
+          spd: effective.spd,
+          spe: effective.spe
         },
         tags
       );
 
       return {
         ...row,
+        type1Id: effective.type1Id,
+        type2Id: effective.type2Id,
+        hp: effective.hp,
+        atk: effective.atk,
+        def: effective.def,
+        spa: effective.spa,
+        spd: effective.spd,
+        spe: effective.spe,
+        type1Name: typeNameById.get(effective.type1Id) ?? null,
+        type2Name: effective.type2Id ? typeNameById.get(effective.type2Id) ?? null : null,
         potentials
       };
     })
@@ -495,42 +672,53 @@ async function ensureTeamSlots(gameId: number) {
 
 app.get("/api/games/:id/team", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
+  const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
+  if (game.length === 0) return res.status(404).json({ error: "Game not found" });
+  const packId = game[0].packId;
+
   await ensureTeamSlots(gameId);
 
   const slots = await db.select().from(teamSlots).where(eq(teamSlots.gameId, gameId)).orderBy(teamSlots.slotIndex);
   const selectedIds = slots.map((s) => s.boxPokemonId).filter(Boolean) as number[];
-
-  const ability = alias(abilities, "ability");
-  const item = alias(items, "item");
 
   const members = selectedIds.length
     ? await db
         .select({
           id: boxPokemon.id,
           speciesId: boxPokemon.speciesId,
-          abilityTags: ability.tags,
-          itemTags: item.tags,
-          type1Id: species.type1Id,
-          type2Id: species.type2Id
+          abilityTags: packAbilities.tags,
+          itemTags: packItems.tags,
+          type1Id: packSpecies.type1Id,
+          type2Id: packSpecies.type2Id,
+          oType1Id: gameSpeciesOverrides.type1Id,
+          oType2Id: gameSpeciesOverrides.type2Id
         })
         .from(boxPokemon)
-        .innerJoin(species, eq(boxPokemon.speciesId, species.id))
-        .leftJoin(ability, eq(boxPokemon.abilityId, ability.id))
-        .leftJoin(item, eq(boxPokemon.itemId, item.id))
+        .innerJoin(packSpecies, eq(boxPokemon.speciesId, packSpecies.id))
+        .leftJoin(
+          gameSpeciesOverrides,
+          and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
+        )
+        .leftJoin(packAbilities, eq(boxPokemon.abilityId, packAbilities.id))
+        .leftJoin(packItems, eq(boxPokemon.itemId, packItems.id))
         .where(inArray(boxPokemon.id, selectedIds))
     : [];
 
-  const typeList = await db.select().from(types).orderBy(types.name);
-  const chartRows = await db.select().from(typeEffectiveness);
+  const { typesList } = await getPackTypesMap(packId);
+  const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
 
   const teamChart = computeTeamChart(
     members.map((m) => ({
-      type1Id: m.type1Id,
-      type2Id: m.type2Id,
+      type1Id: m.oType1Id ?? m.type1Id,
+      type2Id: m.oType2Id ?? m.type2Id,
       tags: [...parseTags(m.abilityTags), ...parseTags(m.itemTags)]
     })),
-    typeList,
-    chartRows
+    typesList.map((t) => ({ id: t.id, name: t.name })),
+    chartRows.map((r) => ({
+      attackingTypeId: r.attackingTypeId,
+      defendingTypeId: r.defendingTypeId,
+      multiplier: r.multiplier
+    }))
   );
 
   res.json({ slots, teamChart });

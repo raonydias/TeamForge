@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
 import { api } from "../lib/api";
-import { SpeciesRow, TypeRow } from "../lib/types";
+import { GameRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
 import { Card, CardHeader, Input, Select } from "../components/ui";
 import { DataTable } from "../components/DataTable";
 
@@ -21,10 +21,21 @@ export default function GameDex() {
     spe: ""
   });
 
-  const { data: types = [] } = useQuery<TypeRow[]>({ queryKey: ["types"], queryFn: () => api.get("/types") });
+  const { data: game } = useQuery<GameRow | null>({
+    queryKey: ["games", gameId],
+    queryFn: () => api.get(`/games/${gameId}`)
+  });
 
-  const { data: dex = [] } = useQuery<SpeciesRow[]>({
-    queryKey: ["games", gameId, "dex", search, typeId],
+  const packId = game?.packId ?? 0;
+
+  const { data: types = [] } = useQuery<PackTypeRow[]>({
+    queryKey: ["packs", packId, "types"],
+    queryFn: () => api.get(`/packs/${packId}/types`),
+    enabled: !!packId
+  });
+
+  const { data: dex = [] } = useQuery<PackSpeciesRow[]>({
+    queryKey: ["games", gameId, "dex", search, typeId, minStats],
     queryFn: () => {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
@@ -40,7 +51,7 @@ export default function GameDex() {
     }
   });
 
-  const columns: ColumnDef<SpeciesRow>[] = [
+  const columns: ColumnDef<PackSpeciesRow>[] = [
     { header: "Name", accessorKey: "name", cell: (info) => <span className="font-medium">{info.getValue<string>()}</span> },
     {
       header: "Types",

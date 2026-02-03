@@ -1,4 +1,4 @@
-import { PropsWithChildren } from "react";
+import React, { PropsWithChildren } from "react";
 
 export function Card({ children }: PropsWithChildren) {
   return <div className="bg-white/80 backdrop-blur rounded-2xl shadow-sm border border-slate-200 p-6">{children}</div>;
@@ -36,27 +36,35 @@ export function GhostButton({ children, onClick }: PropsWithChildren<{ onClick?:
   );
 }
 
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={`w-full rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent ${
-        props.className ?? ""
-      }`}
-    />
-  );
-}
+export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  (props, ref) => {
+    return (
+      <input
+        {...props}
+        ref={ref}
+        className={`w-full rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent ${
+          props.className ?? ""
+        }`}
+      />
+    );
+  }
+);
+Input.displayName = "Input";
 
-export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className={`w-full rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent ${
-        props.className ?? ""
-      }`}
-    />
-  );
-}
+export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
+  (props, ref) => {
+    return (
+      <select
+        {...props}
+        ref={ref}
+        className={`w-full rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent ${
+          props.className ?? ""
+        }`}
+      />
+    );
+  }
+);
+Select.displayName = "Select";
 
 export function Badge({ children }: PropsWithChildren) {
   return <span className="inline-flex items-center px-2 py-1 rounded-full bg-slate-100 text-xs text-slate-600">{children}</span>;

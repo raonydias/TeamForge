@@ -1,8 +1,9 @@
 import { NavLink, Route, Routes } from "react-router-dom";
-import GlobalTypes from "./routes/GlobalTypes";
-import GlobalSpecies from "./routes/GlobalSpecies";
-import GlobalAbilities from "./routes/GlobalAbilities";
-import GlobalItems from "./routes/GlobalItems";
+import Packs from "./routes/Packs";
+import PackTypes from "./routes/PackTypes";
+import PackSpecies from "./routes/PackSpecies";
+import PackAbilities from "./routes/PackAbilities";
+import PackItems from "./routes/PackItems";
 import Games from "./routes/Games";
 import GameSetup from "./routes/GameSetup";
 import GameDex from "./routes/GameDex";
@@ -10,10 +11,7 @@ import GameBox from "./routes/GameBox";
 import GameTeam from "./routes/GameTeam";
 
 const navItems = [
-  { to: "/global/types", label: "Types & Chart" },
-  { to: "/global/species", label: "Species" },
-  { to: "/global/abilities", label: "Abilities" },
-  { to: "/global/items", label: "Items" },
+  { to: "/packs", label: "Packs" },
   { to: "/games", label: "Games" }
 ];
 
@@ -40,22 +38,21 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto text-xs text-slate-400">
-          Built for fast filtering and local-first team scoring.
-        </div>
+        <div className="mt-auto text-xs text-slate-400">Built for fast filtering and local-first team scoring.</div>
       </aside>
       <main className="p-8">
         <Routes>
-          <Route path="/global/types" element={<GlobalTypes />} />
-          <Route path="/global/species" element={<GlobalSpecies />} />
-          <Route path="/global/abilities" element={<GlobalAbilities />} />
-          <Route path="/global/items" element={<GlobalItems />} />
+          <Route path="/packs" element={<Packs />} />
+          <Route path="/packs/:id/types" element={<PackTypes />} />
+          <Route path="/packs/:id/species" element={<PackSpecies />} />
+          <Route path="/packs/:id/abilities" element={<PackAbilities />} />
+          <Route path="/packs/:id/items" element={<PackItems />} />
           <Route path="/games" element={<Games />} />
           <Route path="/games/:id/setup" element={<GameSetup />} />
           <Route path="/games/:id/dex" element={<GameDex />} />
           <Route path="/games/:id/box" element={<GameBox />} />
           <Route path="/games/:id/team" element={<GameTeam />} />
-          <Route path="*" element={<GlobalTypes />} />
+          <Route path="*" element={<Packs />} />
         </Routes>
       </main>
     </div>

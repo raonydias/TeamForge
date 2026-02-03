@@ -1,11 +1,14 @@
+import { eq } from "drizzle-orm";
 import { db } from "./index.js";
 import {
-  abilities,
-  items,
-  settings,
-  species,
-  typeEffectiveness,
-  types
+  packs,
+  packTypes,
+  packTypeEffectiveness,
+  packSpecies,
+  packAbilities,
+  packItems,
+  packSpeciesAbilities,
+  settings
 } from "./schema.js";
 
 const defaultWeights = {
@@ -18,28 +21,41 @@ const defaultWeights = {
 };
 
 export async function seedIfEmpty() {
-  const existingTypes = await db.select().from(types).limit(1);
+  const existingPacks = await db.select().from(packs).limit(1);
+  let packId: number | null = null;
+
+  if (existingPacks.length === 0) {
+    const [pack] = await db
+      .insert(packs)
+      .values({ name: "Canonical Core", description: "Starter pack with core types/species." })
+      .returning();
+    packId = pack.id;
+  } else {
+    packId = existingPacks[0].id;
+  }
+
+  const existingTypes = await db.select().from(packTypes).where(eq(packTypes.packId, packId!)).limit(1);
   if (existingTypes.length === 0) {
-    await db.insert(types).values([
-      { name: "Normal" },
-      { name: "Fire" },
-      { name: "Water" },
-      { name: "Grass" },
-      { name: "Electric" },
-      { name: "Ground" }
+    await db.insert(packTypes).values([
+      { packId: packId!, name: "Normal" },
+      { packId: packId!, name: "Fire" },
+      { packId: packId!, name: "Water" },
+      { packId: packId!, name: "Grass" },
+      { packId: packId!, name: "Electric" },
+      { packId: packId!, name: "Ground" }
     ]);
   }
 
-  const existingTypeRows = await db.select().from(typeEffectiveness).limit(1);
+  const existingTypeRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId!)).limit(1);
   if (existingTypeRows.length === 0) {
-    const allTypes = await db.select().from(types);
+    const allTypes = await db.select().from(packTypes).where(eq(packTypes.packId, packId!));
     const byName = new Map(allTypes.map((t) => [t.name, t.id]));
 
-    const pairs: { attackingTypeId: number; defendingTypeId: number; multiplier: number }[] = [];
+    const pairs: { packId: number; attackingTypeId: number; defendingTypeId: number; multiplier: number }[] = [];
 
     for (const atk of allTypes) {
       for (const def of allTypes) {
-        pairs.push({ attackingTypeId: atk.id, defendingTypeId: def.id, multiplier: 1 });
+        pairs.push({ packId: packId!, attackingTypeId: atk.id, defendingTypeId: def.id, multiplier: 1 });
       }
     }
 
@@ -63,16 +79,37 @@ export async function seedIfEmpty() {
     set("Ground", "Fire", 2);
     set("Ground", "Grass", 0.5);
 
-    await db.insert(typeEffectiveness).values(pairs);
+    await db.insert(packTypeEffectiveness).values(pairs);
   }
 
-  const existingSpecies = await db.select().from(species).limit(1);
+  const existingAbilities = await db.select().from(packAbilities).where(eq(packAbilities.packId, packId!)).limit(1);
+  if (existingAbilities.length === 0) {
+    await db.insert(packAbilities).values([
+      { packId: packId!, name: "Overgrow", tags: JSON.stringify([]) },
+      { packId: packId!, name: "Blaze", tags: JSON.stringify([]) },
+      { packId: packId!, name: "Torrent", tags: JSON.stringify([]) },
+      { packId: packId!, name: "Static", tags: JSON.stringify([]) },
+      { packId: packId!, name: "Swift Feet", tags: JSON.stringify(["mult:speed:1.2"]) },
+      { packId: packId!, name: "Rock Skin", tags: JSON.stringify(["mult:def:1.1", "resist:fire"]) }
+    ]);
+  }
+
+  const existingItems = await db.select().from(packItems).where(eq(packItems.packId, packId!)).limit(1);
+  if (existingItems.length === 0) {
+    await db.insert(packItems).values([
+      { packId: packId!, name: "Power Band", tags: JSON.stringify(["mult:atk:1.2"]) },
+      { packId: packId!, name: "Insulating Boots", tags: JSON.stringify(["immune:ground"]) }
+    ]);
+  }
+
+  const existingSpecies = await db.select().from(packSpecies).where(eq(packSpecies.packId, packId!)).limit(1);
   if (existingSpecies.length === 0) {
-    const allTypes = await db.select().from(types);
+    const allTypes = await db.select().from(packTypes).where(eq(packTypes.packId, packId!));
     const byName = new Map(allTypes.map((t) => [t.name, t.id]));
 
-    await db.insert(species).values([
+    await db.insert(packSpecies).values([
       {
+        packId: packId!,
         name: "Bulbasaur",
         type1Id: byName.get("Grass")!,
         type2Id: null,
@@ -84,6 +121,7 @@ export async function seedIfEmpty() {
         spe: 45
       },
       {
+        packId: packId!,
         name: "Charmander",
         type1Id: byName.get("Fire")!,
         type2Id: null,
@@ -95,6 +133,7 @@ export async function seedIfEmpty() {
         spe: 65
       },
       {
+        packId: packId!,
         name: "Squirtle",
         type1Id: byName.get("Water")!,
         type2Id: null,
@@ -106,6 +145,7 @@ export async function seedIfEmpty() {
         spe: 43
       },
       {
+        packId: packId!,
         name: "Pikachu",
         type1Id: byName.get("Electric")!,
         type2Id: null,
@@ -119,19 +159,23 @@ export async function seedIfEmpty() {
     ]);
   }
 
-  const existingAbilities = await db.select().from(abilities).limit(1);
-  if (existingAbilities.length === 0) {
-    await db.insert(abilities).values([
-      { name: "Swift Feet", tags: JSON.stringify(["mult:speed:1.2"]) },
-      { name: "Rock Skin", tags: JSON.stringify(["mult:def:1.1", "resist:fire"]) }
-    ]);
-  }
+  const existingSpeciesAbilities = await db
+    .select()
+    .from(packSpeciesAbilities)
+    .where(eq(packSpeciesAbilities.packId, packId!))
+    .limit(1);
 
-  const existingItems = await db.select().from(items).limit(1);
-  if (existingItems.length === 0) {
-    await db.insert(items).values([
-      { name: "Power Band", tags: JSON.stringify(["mult:atk:1.2"]) },
-      { name: "Insulating Boots", tags: JSON.stringify(["immune:ground"]) }
+  if (existingSpeciesAbilities.length === 0) {
+    const speciesList = await db.select().from(packSpecies).where(eq(packSpecies.packId, packId!));
+    const abilitiesList = await db.select().from(packAbilities).where(eq(packAbilities.packId, packId!));
+    const speciesByName = new Map(speciesList.map((s) => [s.name, s.id]));
+    const abilityByName = new Map(abilitiesList.map((a) => [a.name, a.id]));
+
+    await db.insert(packSpeciesAbilities).values([
+      { packId: packId!, speciesId: speciesByName.get("Bulbasaur")!, abilityId: abilityByName.get("Overgrow")!, slot: "1" },
+      { packId: packId!, speciesId: speciesByName.get("Charmander")!, abilityId: abilityByName.get("Blaze")!, slot: "1" },
+      { packId: packId!, speciesId: speciesByName.get("Squirtle")!, abilityId: abilityByName.get("Torrent")!, slot: "1" },
+      { packId: packId!, speciesId: speciesByName.get("Pikachu")!, abilityId: abilityByName.get("Static")!, slot: "1" }
     ]);
   }
 

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
 import { api } from "../lib/api";
-import { BoxRow, SpeciesRow, TagRow } from "../lib/types";
+import { BoxRow, GameRow, PackAbilityRow, PackItemRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
 import { Button, Card, CardHeader, Input, Select } from "../components/ui";
 import { DataTable } from "../components/DataTable";
 
@@ -14,6 +14,13 @@ export default function GameBox() {
   const [search, setSearch] = useState("");
   const [typeId, setTypeId] = useState("");
   const [minOverall, setMinOverall] = useState("");
+
+  const { data: game } = useQuery<GameRow | null>({
+    queryKey: ["games", gameId],
+    queryFn: () => api.get(`/games/${gameId}`)
+  });
+
+  const packId = game?.packId ?? 0;
 
   const { data: box = [] } = useQuery<BoxRow[]>({
     queryKey: ["games", gameId, "box"],
@@ -33,10 +40,26 @@ export default function GameBox() {
     queryFn: () => api.get(`/games/${gameId}/allowed-items`)
   });
 
-  const { data: species = [] } = useQuery<SpeciesRow[]>({ queryKey: ["species"], queryFn: () => api.get("/species") });
-  const { data: abilities = [] } = useQuery<TagRow[]>({ queryKey: ["abilities"], queryFn: () => api.get("/abilities") });
-  const { data: items = [] } = useQuery<TagRow[]>({ queryKey: ["items"], queryFn: () => api.get("/items") });
-  const { data: types = [] } = useQuery<{ id: number; name: string }[]>({ queryKey: ["types"], queryFn: () => api.get("/types") });
+  const { data: species = [] } = useQuery<PackSpeciesRow[]>({
+    queryKey: ["packs", packId, "species"],
+    queryFn: () => api.get(`/packs/${packId}/species`),
+    enabled: !!packId
+  });
+  const { data: abilities = [] } = useQuery<PackAbilityRow[]>({
+    queryKey: ["packs", packId, "abilities"],
+    queryFn: () => api.get(`/packs/${packId}/abilities`),
+    enabled: !!packId
+  });
+  const { data: items = [] } = useQuery<PackItemRow[]>({
+    queryKey: ["packs", packId, "items"],
+    queryFn: () => api.get(`/packs/${packId}/items`),
+    enabled: !!packId
+  });
+  const { data: types = [] } = useQuery<PackTypeRow[]>({
+    queryKey: ["packs", packId, "types"],
+    queryFn: () => api.get(`/packs/${packId}/types`),
+    enabled: !!packId
+  });
 
   const allowedSpeciesList = species.filter((s) => allowedSpecies.includes(s.id));
   const allowedAbilitiesList = abilities.filter((a) => allowedAbilities.includes(a.id));
@@ -96,7 +119,9 @@ export default function GameBox() {
   ];
 
   const filteredBox = box.filter((row) => {
-    const matchesSearch = search ? row.speciesName.toLowerCase().includes(search.toLowerCase()) || (row.nickname ?? "").toLowerCase().includes(search.toLowerCase()) : true;
+    const matchesSearch = search
+      ? row.speciesName.toLowerCase().includes(search.toLowerCase()) || (row.nickname ?? "").toLowerCase().includes(search.toLowerCase())
+      : true;
     const matchesType = typeId ? row.type1Id === Number(typeId) || row.type2Id === Number(typeId) : true;
     const matchesOverall = minOverall ? row.potentials.overall >= Number(minOverall) : true;
     return matchesSearch && matchesType && matchesOverall;
