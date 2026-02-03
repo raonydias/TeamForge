@@ -1,0 +1,106 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../lib/api";
+import { TypeChartRow, TypeRow } from "../lib/types";
+import { Button, Card, CardHeader, Input } from "../components/ui";
+
+export default function GlobalTypes() {
+  const queryClient = useQueryClient();
+  const { data: types = [] } = useQuery<TypeRow[]>({ queryKey: ["types"], queryFn: () => api.get("/types") });
+  const { data: chart = [] } = useQuery<TypeChartRow[]>({
+    queryKey: ["typechart"],
+    queryFn: () => api.get("/typechart")
+  });
+
+  const [name, setName] = useState("");
+
+  const createType = useMutation({
+    mutationFn: (payload: { name: string }) => api.post<TypeRow>("/types", payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["types"] })
+  });
+
+  const updateChart = useMutation({
+    mutationFn: (payload: TypeChartRow) => api.post("/typechart", payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["typechart"] })
+  });
+
+  const chartMap = useMemo(() => {
+    const map = new Map<string, number>();
+    chart.forEach((row) => map.set(`${row.attackingTypeId}-${row.defendingTypeId}`, row.multiplier));
+    return map;
+  }, [chart]);
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader title="Types" subtitle="Define the global type list." />
+        <div className="flex gap-3 max-w-lg">
+          <Input placeholder="Type name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Button
+            onClick={() => {
+              if (!name.trim()) return;
+              createType.mutate({ name: name.trim() });
+              setName("");
+            }}
+          >
+            Add
+          </Button>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {types.map((type) => (
+            <span key={type.id} className="px-3 py-1 rounded-full bg-slate-100 text-sm">
+              {type.name}
+            </span>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Type Chart" subtitle="Edit effectiveness multipliers for each matchup." />
+        <div className="overflow-auto">
+          <table className="min-w-[700px] text-sm border-separate border-spacing-2">
+            <thead>
+              <tr>
+                <th className="text-left text-slate-500">Atk \ Def</th>
+                {types.map((type) => (
+                  <th key={type.id} className="text-left text-slate-600">
+                    {type.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {types.map((atk) => (
+                <tr key={atk.id}>
+                  <td className="font-medium text-slate-700">{atk.name}</td>
+                  {types.map((def) => {
+                    const key = `${atk.id}-${def.id}`;
+                    const value = chartMap.get(key) ?? 1;
+                    return (
+                      <td key={key}>
+                        <Input
+                          type="number"
+                          step="0.5"
+                          value={value}
+                          onChange={(e) => {
+                            const next = Number(e.target.value);
+                            updateChart.mutate({
+                              attackingTypeId: atk.id,
+                              defendingTypeId: def.id,
+                              multiplier: Number.isFinite(next) ? next : 1
+                            });
+                          }}
+                          className="w-20"
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}

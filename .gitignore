@@ -1,1 +1,8 @@
 pitch.txt
+node_modules
+dist
+client/dist
+server/dist
+data/app.db
+.env
+*.log
