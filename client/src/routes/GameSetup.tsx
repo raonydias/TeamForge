@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { GameRow, PackAbilityRow, PackItemRow, PackSpeciesRow } from "../lib/types";
+import { GameRow, GameAbilityRow, GameItemRow, GameSpeciesRow } from "../lib/types";
 import { Button, Card, CardHeader } from "../components/ui";
 
 function ToggleList({
@@ -58,22 +58,20 @@ export default function GameSetup() {
     queryFn: () => api.get(`/games/${gameId}`)
   });
 
-  const packId = game?.packId ?? 0;
-
-  const { data: species = [] } = useQuery<PackSpeciesRow[]>({
-    queryKey: ["packs", packId, "species"],
-    queryFn: () => api.get(`/packs/${packId}/species`),
-    enabled: !!packId
+  const { data: species = [] } = useQuery<GameSpeciesRow[]>({
+    queryKey: ["games", gameId, "species"],
+    queryFn: () => api.get(`/games/${gameId}/species`),
+    enabled: !!gameId
   });
-  const { data: abilities = [] } = useQuery<PackAbilityRow[]>({
-    queryKey: ["packs", packId, "abilities"],
-    queryFn: () => api.get(`/packs/${packId}/abilities`),
-    enabled: !!packId
+  const { data: abilities = [] } = useQuery<GameAbilityRow[]>({
+    queryKey: ["games", gameId, "abilities"],
+    queryFn: () => api.get(`/games/${gameId}/abilities`),
+    enabled: !!gameId
   });
-  const { data: items = [] } = useQuery<PackItemRow[]>({
-    queryKey: ["packs", packId, "items"],
-    queryFn: () => api.get(`/packs/${packId}/items`),
-    enabled: !!packId
+  const { data: items = [] } = useQuery<GameItemRow[]>({
+    queryKey: ["games", gameId, "items"],
+    queryFn: () => api.get(`/games/${gameId}/items`),
+    enabled: !!gameId
   });
 
   const { data: allowedSpecies } = useQuery<number[]>({

@@ -61,6 +61,12 @@
       "version": "0009",
       "when": 1700000000009,
       "tag": "0009_pack_species_base_species_id"
+    },
+    {
+      "idx": 10,
+      "version": "0010",
+      "when": 1700000000010,
+      "tag": "0010_stacked_packs"
     }
   ]
 }

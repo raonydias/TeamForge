@@ -136,7 +136,7 @@ export default function Packs() {
                           allowedSpecies: number;
                           allowedAbilities: number;
                           allowedItems: number;
-                          speciesOverrides: number;
+                        speciesAbilities: number;
                           speciesAbilities: number;
                         }>(`/packs/${pack.id}/summary`);
 
@@ -150,7 +150,7 @@ export default function Packs() {
                           `Game Allowed Species: ${summary.allowedSpecies}`,
                           `Game Allowed Abilities: ${summary.allowedAbilities}`,
                           `Game Allowed Items: ${summary.allowedItems}`,
-                          `Game Species Overrides: ${summary.speciesOverrides}`,
+                          `Game Species Abilities: ${summary.speciesAbilities}`,
                           `Game Species Abilities: ${summary.speciesAbilities}`,
                           `Box Pokemon: ${summary.boxPokemon}`,
                           `Team Slots: ${summary.teamSlots}`

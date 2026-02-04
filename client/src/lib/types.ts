@@ -70,11 +70,69 @@ export type PackSpeciesEvolutionRow = {
 
 export type GameRow = {
   id: number;
-  packId: number;
+  packIds: number[];
+  packNames: string[];
   name: string;
   notes: string | null;
   disableAbilities: boolean;
   disableHeldItems: boolean;
+  useSingleSpecial?: boolean;
+};
+
+export type GameTypeRow = {
+  id: number;
+  gameId: number;
+  name: string;
+  metadata: string | null;
+  color: string | null;
+  excludeInChart: boolean;
+};
+
+export type GameSpeciesRow = {
+  id: number;
+  gameId: number;
+  dexNumber: number;
+  baseSpeciesId: number | null;
+  name: string;
+  type1Id: number;
+  type2Id: number | null;
+  hp: number;
+  atk: number;
+  def: number;
+  spa: number;
+  spd: number;
+  spe: number;
+  type1Name?: string | null;
+  type2Name?: string | null;
+};
+
+export type GameAbilityRow = {
+  id: number;
+  gameId: number;
+  name: string;
+  tags: string;
+};
+
+export type GameItemRow = {
+  id: number;
+  gameId: number;
+  name: string;
+  tags: string;
+};
+
+export type GameSpeciesAbilityRow = {
+  gameId: number;
+  speciesId: number;
+  abilityId: number;
+  slot: "1" | "2" | "H";
+};
+
+export type GameSpeciesEvolutionRow = {
+  id: number;
+  gameId: number;
+  fromSpeciesId: number;
+  toSpeciesId: number;
+  method: string;
 };
 
 export type BoxRow = {

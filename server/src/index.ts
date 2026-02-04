@@ -15,11 +15,17 @@ import {
   packSpeciesAbilities,
   packSpeciesEvolutions,
   games,
+  gamePacks,
+  gameTypes,
+  gameTypeEffectiveness,
   gameSpecies,
   gameAbilities,
   gameItems,
-  gameSpeciesOverrides,
   gameSpeciesAbilities,
+  gameSpeciesEvolutions,
+  gameAllowedSpecies,
+  gameAllowedAbilities,
+  gameAllowedItems,
   boxPokemon,
   trackedBox,
   teamSlots,
@@ -61,6 +67,24 @@ const typeChartSchema = z.object({
   multiplier: z.number().min(0).max(4)
 });
 
+const typeChartImportSchema = z.object({
+  types: z.array(
+    z.object({
+      name: z.string().min(1),
+      metadata: z.string().optional().nullable(),
+      color: z.string().optional().nullable(),
+      excludeInChart: z.boolean().optional().nullable()
+    })
+  ),
+  chart: z.array(
+    z.object({
+      attackingTypeName: z.string().min(1),
+      defendingTypeName: z.string().min(1),
+      multiplier: z.number().min(0).max(4)
+    })
+  )
+});
+
 const speciesSchema = z.object({
   dexNumber: z.coerce.number().int().min(1),
   baseSpeciesId: idSchema.optional().nullable(),
@@ -96,10 +120,17 @@ const speciesEvolutionSchema = z.object({
   method: z.string().min(1)
 });
 
-const gameSchema = z.object({
+const gameCreateSchema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
-  packId: idSchema,
+  packIds: z.array(idSchema).min(1),
+  disableAbilities: z.boolean().optional().nullable(),
+  disableHeldItems: z.boolean().optional().nullable()
+});
+
+const gameUpdateSchema = z.object({
+  name: z.string().min(1),
+  notes: z.string().optional().nullable(),
   disableAbilities: z.boolean().optional().nullable(),
   disableHeldItems: z.boolean().optional().nullable()
 });
@@ -145,6 +176,12 @@ async function getPackTypesMap(packId: number) {
   return { typesList, typeNameById: map };
 }
 
+async function getGameTypesMap(gameId: number) {
+  const typesList = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId));
+  const map = new Map(typesList.map((t) => [t.id, t.name]));
+  return { typesList, typeNameById: map };
+}
+
 async function getPackById(packId: number) {
   const [row] = await db.select().from(packs).where(eq(packs.id, packId)).limit(1);
   if (!row) return null;
@@ -163,6 +200,345 @@ function applySpeciesOverride(base: any, override: any | null) {
     spd: override?.spd ?? base.spd,
     spe: override?.spe ?? base.spe
   };
+}
+
+function normalizeKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+async function getGameUseSingleSpecial(gameId: number) {
+  const rows = await db
+    .select({ useSingleSpecial: packs.useSingleSpecial })
+    .from(gamePacks)
+    .innerJoin(packs, eq(gamePacks.packId, packs.id))
+    .where(eq(gamePacks.gameId, gameId))
+    .orderBy(sql`${gamePacks.sortOrder} desc`)
+    .limit(1);
+  return rows.length > 0 ? !!rows[0].useSingleSpecial : false;
+}
+
+function buildGameData(tx: any, gameId: number, packIds: number[]) {
+  const packTypesRows = tx.select().from(packTypes).where(inArray(packTypes.packId, packIds)).all();
+  const packAbilitiesRows = tx.select().from(packAbilities).where(inArray(packAbilities.packId, packIds)).all();
+  const packItemsRows = tx.select().from(packItems).where(inArray(packItems.packId, packIds)).all();
+  const packSpeciesRows = tx.select().from(packSpecies).where(inArray(packSpecies.packId, packIds)).all();
+  const packSpeciesAbilitiesRows = tx
+    .select()
+    .from(packSpeciesAbilities)
+    .where(inArray(packSpeciesAbilities.packId, packIds))
+    .all();
+  const packSpeciesEvoRows = tx
+    .select()
+    .from(packSpeciesEvolutions)
+    .where(inArray(packSpeciesEvolutions.packId, packIds))
+    .all();
+  const packChartRows = tx
+    .select()
+    .from(packTypeEffectiveness)
+    .where(inArray(packTypeEffectiveness.packId, packIds))
+    .all();
+
+  const packTypesByPack = new Map<number, typeof packTypesRows>();
+  const packAbilitiesByPack = new Map<number, typeof packAbilitiesRows>();
+  const packItemsByPack = new Map<number, typeof packItemsRows>();
+  const packSpeciesByPack = new Map<number, typeof packSpeciesRows>();
+  const packSpeciesById = new Map<string, (typeof packSpeciesRows)[number]>();
+  const typeKeyByPackId = new Map<string, string>();
+  const abilityKeyByPackId = new Map<string, string>();
+  const itemKeyByPackId = new Map<string, string>();
+
+  for (const row of packTypesRows) {
+    if (!packTypesByPack.has(row.packId)) packTypesByPack.set(row.packId, []);
+    packTypesByPack.get(row.packId)!.push(row);
+    typeKeyByPackId.set(`${row.packId}:${row.id}`, normalizeKey(row.name));
+  }
+
+  for (const row of packAbilitiesRows) {
+    if (!packAbilitiesByPack.has(row.packId)) packAbilitiesByPack.set(row.packId, []);
+    packAbilitiesByPack.get(row.packId)!.push(row);
+    abilityKeyByPackId.set(`${row.packId}:${row.id}`, normalizeKey(row.name));
+  }
+
+  for (const row of packItemsRows) {
+    if (!packItemsByPack.has(row.packId)) packItemsByPack.set(row.packId, []);
+    packItemsByPack.get(row.packId)!.push(row);
+    itemKeyByPackId.set(`${row.packId}:${row.id}`, normalizeKey(row.name));
+  }
+
+  for (const row of packSpeciesRows) {
+    if (!packSpeciesByPack.has(row.packId)) packSpeciesByPack.set(row.packId, []);
+    packSpeciesByPack.get(row.packId)!.push(row);
+    packSpeciesById.set(`${row.packId}:${row.id}`, row);
+  }
+
+  const resolvedTypes = new Map<string, { name: string; metadata: string | null; color: string | null; excludeInChart: number }>();
+  const resolvedAbilities = new Map<string, { name: string; tags: string }>();
+  const resolvedItems = new Map<string, { name: string; tags: string }>();
+
+  for (const packId of packIds) {
+    for (const row of packTypesByPack.get(packId) ?? []) {
+      resolvedTypes.set(normalizeKey(row.name), {
+        name: row.name,
+        metadata: row.metadata ?? null,
+        color: row.color ?? null,
+        excludeInChart: row.excludeInChart ?? 0
+      });
+    }
+    for (const row of packAbilitiesByPack.get(packId) ?? []) {
+      resolvedAbilities.set(normalizeKey(row.name), {
+        name: row.name,
+        tags: row.tags ?? "[]"
+      });
+    }
+    for (const row of packItemsByPack.get(packId) ?? []) {
+      resolvedItems.set(normalizeKey(row.name), {
+        name: row.name,
+        tags: row.tags ?? "[]"
+      });
+    }
+  }
+
+  const resolvedSpecies = new Map<
+    string,
+    {
+      name: string;
+      dexNumber: number;
+      baseSpeciesKey: string | null;
+      type1Key: string;
+      type2Key: string | null;
+      hp: number;
+      atk: number;
+      def: number;
+      spa: number;
+      spd: number;
+      spe: number;
+      sourcePackId: number;
+      sourceSpeciesId: number;
+    }
+  >();
+
+  for (const packId of packIds) {
+    for (const row of packSpeciesByPack.get(packId) ?? []) {
+      const baseRow = row.baseSpeciesId ? packSpeciesById.get(`${packId}:${row.baseSpeciesId}`) : null;
+      const baseSpeciesKey = baseRow ? normalizeKey(baseRow.name) : null;
+      const type1Key = typeKeyByPackId.get(`${packId}:${row.type1Id}`);
+      if (!type1Key) continue;
+      const type2Key = row.type2Id ? typeKeyByPackId.get(`${packId}:${row.type2Id}`) ?? null : null;
+      resolvedSpecies.set(normalizeKey(row.name), {
+        name: row.name,
+        dexNumber: row.dexNumber,
+        baseSpeciesKey,
+        type1Key,
+        type2Key,
+        hp: row.hp,
+        atk: row.atk,
+        def: row.def,
+        spa: row.spa,
+        spd: row.spd,
+        spe: row.spe,
+        sourcePackId: packId,
+        sourceSpeciesId: row.id
+      });
+    }
+  }
+
+  const gameTypeIdByKey = new Map<string, number>();
+  for (const [key, row] of resolvedTypes.entries()) {
+    const inserted = tx
+      .insert(gameTypes)
+      .values({
+        gameId,
+        name: row.name,
+        metadata: row.metadata ?? null,
+        color: row.color ?? null,
+        excludeInChart: row.excludeInChart ?? 0
+      })
+      .returning()
+      .get();
+    gameTypeIdByKey.set(key, inserted.id);
+  }
+
+  const gameAbilityIdByKey = new Map<string, number>();
+  for (const [key, row] of resolvedAbilities.entries()) {
+    const inserted = tx
+      .insert(gameAbilities)
+      .values({
+        gameId,
+        name: row.name,
+        tags: row.tags ?? "[]"
+      })
+      .returning()
+      .get();
+    gameAbilityIdByKey.set(key, inserted.id);
+  }
+
+  const gameItemIdByKey = new Map<string, number>();
+  for (const [key, row] of resolvedItems.entries()) {
+    const inserted = tx
+      .insert(gameItems)
+      .values({
+        gameId,
+        name: row.name,
+        tags: row.tags ?? "[]"
+      })
+      .returning()
+      .get();
+    gameItemIdByKey.set(key, inserted.id);
+  }
+
+  const resolvedSpeciesList = Array.from(resolvedSpecies.entries()).map(([key, row]) => ({ key, ...row }));
+  resolvedSpeciesList.sort((a, b) => {
+    if (a.dexNumber !== b.dexNumber) return a.dexNumber - b.dexNumber;
+    return a.name.localeCompare(b.name);
+  });
+
+  const gameSpeciesIdByKey = new Map<string, number>();
+  const pendingBaseLinks: { speciesKey: string; baseKey: string }[] = [];
+
+  for (const row of resolvedSpeciesList) {
+    const type1Id = gameTypeIdByKey.get(row.type1Key);
+    if (!type1Id) continue;
+    const type2Id = row.type2Key ? gameTypeIdByKey.get(row.type2Key) ?? null : null;
+    const inserted = tx
+      .insert(gameSpecies)
+      .values({
+        gameId,
+        dexNumber: row.dexNumber,
+        baseSpeciesId: null,
+        name: row.name,
+        type1Id,
+        type2Id,
+        hp: row.hp,
+        atk: row.atk,
+        def: row.def,
+        spa: row.spa,
+        spd: row.spd,
+        spe: row.spe
+      })
+      .returning()
+      .get();
+    gameSpeciesIdByKey.set(row.key, inserted.id);
+    if (row.baseSpeciesKey) {
+      pendingBaseLinks.push({ speciesKey: row.key, baseKey: row.baseSpeciesKey });
+    }
+  }
+
+  for (const link of pendingBaseLinks) {
+    const speciesId = gameSpeciesIdByKey.get(link.speciesKey);
+    const baseId = gameSpeciesIdByKey.get(link.baseKey);
+    if (!speciesId || !baseId) continue;
+    tx.update(gameSpecies).set({ baseSpeciesId: baseId }).where(eq(gameSpecies.id, speciesId)).run();
+  }
+
+  const lastPackId = packIds[packIds.length - 1];
+  const chartRows = packChartRows.filter((row: any) => row.packId === lastPackId);
+  for (const row of chartRows) {
+    const atkKey = typeKeyByPackId.get(`${lastPackId}:${row.attackingTypeId}`);
+    const defKey = typeKeyByPackId.get(`${lastPackId}:${row.defendingTypeId}`);
+    if (!atkKey || !defKey) continue;
+    const atkId = gameTypeIdByKey.get(atkKey);
+    const defId = gameTypeIdByKey.get(defKey);
+    if (!atkId || !defId) continue;
+    tx.insert(gameTypeEffectiveness)
+      .values({
+        gameId,
+        attackingTypeId: atkId,
+        defendingTypeId: defId,
+        multiplier: row.multiplier
+      })
+      .run();
+  }
+
+  const packSpeciesAbilitiesByKey = new Map<string, typeof packSpeciesAbilitiesRows>();
+  for (const row of packSpeciesAbilitiesRows) {
+    const key = `${row.packId}:${row.speciesId}`;
+    if (!packSpeciesAbilitiesByKey.has(key)) packSpeciesAbilitiesByKey.set(key, []);
+    packSpeciesAbilitiesByKey.get(key)!.push(row);
+  }
+
+  for (const row of resolvedSpeciesList) {
+    const key = `${row.sourcePackId}:${row.sourceSpeciesId}`;
+    const abilityRows = packSpeciesAbilitiesByKey.get(key) ?? [];
+    const gameSpeciesId = gameSpeciesIdByKey.get(row.key);
+    if (!gameSpeciesId) continue;
+    for (const abilityRow of abilityRows) {
+      const abilityKey = abilityKeyByPackId.get(`${abilityRow.packId}:${abilityRow.abilityId}`);
+      if (!abilityKey) continue;
+      const gameAbilityId = gameAbilityIdByKey.get(abilityKey);
+      if (!gameAbilityId) continue;
+      tx.insert(gameSpeciesAbilities)
+        .values({
+          gameId,
+          speciesId: gameSpeciesId,
+          abilityId: gameAbilityId,
+          slot: abilityRow.slot
+        })
+        .run();
+    }
+  }
+
+  const packEvoByKey = new Map<string, typeof packSpeciesEvoRows>();
+  for (const row of packSpeciesEvoRows) {
+    const key = `${row.packId}:${row.fromSpeciesId}`;
+    if (!packEvoByKey.has(key)) packEvoByKey.set(key, []);
+    packEvoByKey.get(key)!.push(row);
+  }
+
+  for (const row of resolvedSpeciesList) {
+    const key = `${row.sourcePackId}:${row.sourceSpeciesId}`;
+    const evoRows = packEvoByKey.get(key) ?? [];
+    const fromId = gameSpeciesIdByKey.get(row.key);
+    if (!fromId) continue;
+    for (const evo of evoRows) {
+      const toSpecies = packSpeciesById.get(`${evo.packId}:${evo.toSpeciesId}`);
+      if (!toSpecies) continue;
+      const toKey = normalizeKey(toSpecies.name);
+      const toId = gameSpeciesIdByKey.get(toKey);
+      if (!toId) continue;
+      tx.insert(gameSpeciesEvolutions)
+        .values({
+          gameId,
+          fromSpeciesId: fromId,
+          toSpeciesId: toId,
+          method: evo.method
+        })
+        .run();
+    }
+  }
+
+  const allowedSpeciesIds = Array.from(gameSpeciesIdByKey.values());
+  if (allowedSpeciesIds.length > 0) {
+    tx.insert(gameAllowedSpecies).values(allowedSpeciesIds.map((speciesId) => ({ gameId, speciesId }))).run();
+  }
+
+  const allowedAbilityIds = Array.from(gameAbilityIdByKey.values());
+  if (allowedAbilityIds.length > 0) {
+    tx.insert(gameAllowedAbilities).values(allowedAbilityIds.map((abilityId) => ({ gameId, abilityId }))).run();
+  }
+
+  const allowedItemIds = Array.from(gameItemIdByKey.values());
+  if (allowedItemIds.length > 0) {
+    tx.insert(gameAllowedItems).values(allowedItemIds.map((itemId) => ({ gameId, itemId }))).run();
+  }
+
+  tx.insert(gamePacks)
+    .values(
+      packIds.map((packId, idx) => ({
+        gameId,
+        packId,
+        sortOrder: idx
+      }))
+    )
+    .run();
+}
+
+async function getGamePackStack(gameId: number) {
+  return db
+    .select({ packId: gamePacks.packId, name: packs.name, sortOrder: gamePacks.sortOrder })
+    .from(gamePacks)
+    .innerJoin(packs, eq(gamePacks.packId, packs.id))
+    .where(eq(gamePacks.gameId, gameId))
+    .orderBy(gamePacks.sortOrder);
 }
 
 // Packs
@@ -207,18 +583,28 @@ app.put("/api/packs/:id", async (req, res) => {
 app.delete("/api/packs/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   db.transaction((tx) => {
-    const gameRows = tx.select({ id: games.id }).from(games).where(eq(games.packId, id)).all();
+    const gameRows = tx
+      .select({ id: gamePacks.gameId })
+      .from(gamePacks)
+      .where(eq(gamePacks.packId, id))
+      .all();
     const gameIds = gameRows.map((g) => g.id);
 
     if (gameIds.length > 0) {
       tx.delete(teamSlots).where(inArray(teamSlots.gameId, gameIds)).run();
       tx.delete(boxPokemon).where(inArray(boxPokemon.gameId, gameIds)).run();
       tx.delete(trackedBox).where(inArray(trackedBox.gameId, gameIds)).run();
+      tx.delete(gameAllowedSpecies).where(inArray(gameAllowedSpecies.gameId, gameIds)).run();
+      tx.delete(gameAllowedAbilities).where(inArray(gameAllowedAbilities.gameId, gameIds)).run();
+      tx.delete(gameAllowedItems).where(inArray(gameAllowedItems.gameId, gameIds)).run();
       tx.delete(gameSpeciesAbilities).where(inArray(gameSpeciesAbilities.gameId, gameIds)).run();
-      tx.delete(gameSpeciesOverrides).where(inArray(gameSpeciesOverrides.gameId, gameIds)).run();
+      tx.delete(gameSpeciesEvolutions).where(inArray(gameSpeciesEvolutions.gameId, gameIds)).run();
       tx.delete(gameSpecies).where(inArray(gameSpecies.gameId, gameIds)).run();
       tx.delete(gameAbilities).where(inArray(gameAbilities.gameId, gameIds)).run();
       tx.delete(gameItems).where(inArray(gameItems.gameId, gameIds)).run();
+      tx.delete(gameTypeEffectiveness).where(inArray(gameTypeEffectiveness.gameId, gameIds)).run();
+      tx.delete(gameTypes).where(inArray(gameTypes.gameId, gameIds)).run();
+      tx.delete(gamePacks).where(inArray(gamePacks.gameId, gameIds)).run();
       tx.delete(games).where(inArray(games.id, gameIds)).run();
     }
 
@@ -253,13 +639,9 @@ app.get("/api/packs/:id/summary", async (req, res) => {
     .select({ count: sql<number>`count(*)` })
     .from(packItems)
     .where(eq(packItems.packId, packId));
-  const [gamesCount] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(games)
-    .where(eq(games.packId, packId));
-
-  const gameRows = await db.select({ id: games.id }).from(games).where(eq(games.packId, packId));
+  const gameRows = await db.select({ id: gamePacks.gameId }).from(gamePacks).where(eq(gamePacks.packId, packId));
   const gameIds = gameRows.map((g) => g.id);
+  const gamesCount = gameIds.length;
 
   const [boxCount] = gameIds.length
     ? await db.select({ count: sql<number>`count(*)` }).from(boxPokemon).where(inArray(boxPokemon.gameId, gameIds))
@@ -268,19 +650,28 @@ app.get("/api/packs/:id/summary", async (req, res) => {
     ? await db.select({ count: sql<number>`count(*)` }).from(teamSlots).where(inArray(teamSlots.gameId, gameIds))
     : [{ count: 0 }];
   const [allowedSpeciesCount] = gameIds.length
-    ? await db.select({ count: sql<number>`count(*)` }).from(gameSpecies).where(inArray(gameSpecies.gameId, gameIds))
+    ? await db
+        .select({ count: sql<number>`count(*)` })
+        .from(gameAllowedSpecies)
+        .where(inArray(gameAllowedSpecies.gameId, gameIds))
     : [{ count: 0 }];
   const [allowedAbilitiesCount] = gameIds.length
-    ? await db.select({ count: sql<number>`count(*)` }).from(gameAbilities).where(inArray(gameAbilities.gameId, gameIds))
+    ? await db
+        .select({ count: sql<number>`count(*)` })
+        .from(gameAllowedAbilities)
+        .where(inArray(gameAllowedAbilities.gameId, gameIds))
     : [{ count: 0 }];
   const [allowedItemsCount] = gameIds.length
-    ? await db.select({ count: sql<number>`count(*)` }).from(gameItems).where(inArray(gameItems.gameId, gameIds))
-    : [{ count: 0 }];
-  const [speciesOverridesCount] = gameIds.length
-    ? await db.select({ count: sql<number>`count(*)` }).from(gameSpeciesOverrides).where(inArray(gameSpeciesOverrides.gameId, gameIds))
+    ? await db
+        .select({ count: sql<number>`count(*)` })
+        .from(gameAllowedItems)
+        .where(inArray(gameAllowedItems.gameId, gameIds))
     : [{ count: 0 }];
   const [speciesAbilitiesCount] = gameIds.length
-    ? await db.select({ count: sql<number>`count(*)` }).from(gameSpeciesAbilities).where(inArray(gameSpeciesAbilities.gameId, gameIds))
+    ? await db
+        .select({ count: sql<number>`count(*)` })
+        .from(gameSpeciesAbilities)
+        .where(inArray(gameSpeciesAbilities.gameId, gameIds))
     : [{ count: 0 }];
 
   res.json({
@@ -288,13 +679,12 @@ app.get("/api/packs/:id/summary", async (req, res) => {
     species: speciesCount?.count ?? 0,
     abilities: abilitiesCount?.count ?? 0,
     items: itemsCount?.count ?? 0,
-    games: gamesCount?.count ?? 0,
+    games: gamesCount ?? 0,
     boxPokemon: boxCount?.count ?? 0,
     teamSlots: teamSlotsCount?.count ?? 0,
     allowedSpecies: allowedSpeciesCount?.count ?? 0,
     allowedAbilities: allowedAbilitiesCount?.count ?? 0,
     allowedItems: allowedItemsCount?.count ?? 0,
-    speciesOverrides: speciesOverridesCount?.count ?? 0,
     speciesAbilities: speciesAbilitiesCount?.count ?? 0
   });
 });
@@ -379,19 +769,6 @@ app.delete("/api/packs/:id/types/:typeId", async (req, res) => {
       .where(and(eq(packSpecies.packId, packId), eq(packSpecies.type2Id, typeId)))
       .run();
 
-    // Update game overrides to keep consistency
-    tx
-      .update(gameSpeciesOverrides)
-      .set({ type1Id: normalType.id })
-      .where(eq(gameSpeciesOverrides.type1Id, typeId))
-      .run();
-
-    tx
-      .update(gameSpeciesOverrides)
-      .set({ type2Id: null })
-      .where(eq(gameSpeciesOverrides.type2Id, typeId))
-      .run();
-
     // Remove type chart rows for this type
     tx
       .delete(packTypeEffectiveness)
@@ -412,6 +789,85 @@ app.get("/api/packs/:id/typechart", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const rows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
   res.json(rows);
+});
+
+app.get("/api/packs/:id/typechart/export", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const typesList = await db.select().from(packTypes).where(eq(packTypes.packId, packId)).orderBy(packTypes.name);
+  const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
+  const nameById = new Map(typesList.map((t) => [t.id, t.name]));
+  res.json({
+    types: typesList.map((t) => ({
+      name: t.name,
+      metadata: t.metadata ?? null,
+      color: t.color ?? null,
+      excludeInChart: !!t.excludeInChart
+    })),
+    chart: chartRows
+      .map((row) => ({
+        attackingTypeName: nameById.get(row.attackingTypeId) ?? "",
+        defendingTypeName: nameById.get(row.defendingTypeId) ?? "",
+        multiplier: row.multiplier
+      }))
+      .filter((row) => row.attackingTypeName && row.defendingTypeName)
+  });
+});
+
+app.post("/api/packs/:id/typechart/import", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const data = typeChartImportSchema.parse(req.body);
+  db.transaction((tx) => {
+    const existingTypes = tx.select().from(packTypes).where(eq(packTypes.packId, packId)).all();
+    const existingByKey = new Map(existingTypes.map((t) => [normalizeKey(t.name), t]));
+    const typeIdByKey = new Map<string, number>();
+
+    for (const type of data.types) {
+      const key = normalizeKey(type.name);
+      const existing = existingByKey.get(key);
+      if (existing) {
+        tx.update(packTypes)
+          .set({
+            name: type.name,
+            metadata: type.metadata ?? null,
+            color: type.color ?? null,
+            excludeInChart: type.excludeInChart ? 1 : 0
+          })
+          .where(eq(packTypes.id, existing.id))
+          .run();
+        typeIdByKey.set(key, existing.id);
+      } else {
+        const inserted = tx
+          .insert(packTypes)
+          .values({
+            packId,
+            name: type.name,
+            metadata: type.metadata ?? null,
+            color: type.color ?? null,
+            excludeInChart: type.excludeInChart ? 1 : 0
+          })
+          .returning()
+          .get();
+        typeIdByKey.set(key, inserted.id);
+      }
+    }
+
+    tx.delete(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId)).run();
+
+    for (const row of data.chart) {
+      const atkId = typeIdByKey.get(normalizeKey(row.attackingTypeName));
+      const defId = typeIdByKey.get(normalizeKey(row.defendingTypeName));
+      if (!atkId || !defId) continue;
+      tx.insert(packTypeEffectiveness)
+        .values({
+          packId,
+          attackingTypeId: atkId,
+          defendingTypeId: defId,
+          multiplier: row.multiplier
+        })
+        .run();
+    }
+  });
+  res.json({ ok: true });
 });
 
 app.post("/api/packs/:id/typechart", async (req, res) => {
@@ -510,32 +966,6 @@ app.delete("/api/packs/:id/species/:speciesId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const speciesId = idSchema.parse(req.params.speciesId);
   db.transaction((tx) => {
-    const gamesUsingPack = tx.select({ id: games.id }).from(games).where(eq(games.packId, packId)).all();
-    const gameIds = gamesUsingPack.map((g) => g.id);
-
-    if (gameIds.length > 0) {
-      const boxRows = tx
-        .select({ id: boxPokemon.id })
-        .from(boxPokemon)
-        .where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.speciesId, speciesId)))
-        .all();
-      const boxIds = boxRows.map((b) => b.id);
-
-      if (boxIds.length > 0) {
-        tx
-          .update(teamSlots)
-          .set({ boxPokemonId: null })
-          .where(inArray(teamSlots.boxPokemonId, boxIds))
-          .run();
-        tx.delete(boxPokemon).where(inArray(boxPokemon.id, boxIds)).run();
-      }
-
-      tx.delete(trackedBox).where(and(inArray(trackedBox.gameId, gameIds), eq(trackedBox.speciesId, speciesId))).run();
-      tx.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.speciesId, speciesId)).run();
-      tx.delete(gameSpeciesOverrides).where(eq(gameSpeciesOverrides.speciesId, speciesId)).run();
-      tx.delete(gameSpecies).where(and(inArray(gameSpecies.gameId, gameIds), eq(gameSpecies.speciesId, speciesId))).run();
-    }
-
     tx.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.speciesId, speciesId))).run();
     tx
       .delete(packSpeciesEvolutions)
@@ -592,16 +1022,6 @@ app.delete("/api/packs/:id/abilities/:abilityId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const abilityId = idSchema.parse(req.params.abilityId);
   db.transaction((tx) => {
-    const gamesUsingPack = tx.select({ id: games.id }).from(games).where(eq(games.packId, packId)).all();
-    const gameIds = gamesUsingPack.map((g) => g.id);
-
-    if (gameIds.length > 0) {
-      tx.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.abilityId, abilityId)).run();
-      tx.delete(gameAbilities).where(and(inArray(gameAbilities.gameId, gameIds), eq(gameAbilities.abilityId, abilityId))).run();
-      tx.delete(boxPokemon).where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.abilityId, abilityId))).run();
-      tx.delete(trackedBox).where(and(inArray(trackedBox.gameId, gameIds), eq(trackedBox.abilityId, abilityId))).run();
-    }
-
     tx.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.abilityId, abilityId))).run();
     tx.delete(packAbilities).where(and(eq(packAbilities.id, abilityId), eq(packAbilities.packId, packId))).run();
   });
@@ -649,23 +1069,6 @@ app.delete("/api/packs/:id/items/:itemId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const itemId = idSchema.parse(req.params.itemId);
   db.transaction((tx) => {
-    const gamesUsingPack = tx.select({ id: games.id }).from(games).where(eq(games.packId, packId)).all();
-    const gameIds = gamesUsingPack.map((g) => g.id);
-
-    if (gameIds.length > 0) {
-      tx
-        .update(boxPokemon)
-        .set({ itemId: null })
-        .where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.itemId, itemId)))
-        .run();
-      tx
-        .update(trackedBox)
-        .set({ itemId: null })
-        .where(and(inArray(trackedBox.gameId, gameIds), eq(trackedBox.itemId, itemId)))
-        .run();
-      tx.delete(gameItems).where(and(inArray(gameItems.gameId, gameIds), eq(gameItems.itemId, itemId))).run();
-    }
-
     tx.delete(packItems).where(and(eq(packItems.id, itemId), eq(packItems.packId, packId))).run();
   });
   res.json({ ok: true });
@@ -745,13 +1148,21 @@ app.post("/api/packs/:id/species-abilities", async (req, res) => {
 // Games
 app.get("/api/games", async (_req, res) => {
   const rows = await db.select().from(games).orderBy(games.name);
-  res.json(
-    rows.map((row) => ({
-      ...row,
-      disableAbilities: !!row.disableAbilities,
-      disableHeldItems: !!row.disableHeldItems
-    }))
+  const payload = await Promise.all(
+    rows.map(async (row) => {
+      const packsStack = await getGamePackStack(row.id);
+      const useSingleSpecial = await getGameUseSingleSpecial(row.id);
+      return {
+        ...row,
+        packIds: packsStack.map((p) => p.packId),
+        packNames: packsStack.map((p) => p.name),
+        useSingleSpecial,
+        disableAbilities: !!row.disableAbilities,
+        disableHeldItems: !!row.disableHeldItems
+      };
+    })
   );
+  res.json(payload);
 });
 
 app.get("/api/games/:id", async (req, res) => {
@@ -761,65 +1172,75 @@ app.get("/api/games/:id", async (req, res) => {
     res.json(null);
     return;
   }
+  const packsStack = await getGamePackStack(id);
+  const useSingleSpecial = await getGameUseSingleSpecial(id);
   res.json({
     ...row,
+    packIds: packsStack.map((p) => p.packId),
+    packNames: packsStack.map((p) => p.name),
+    useSingleSpecial,
     disableAbilities: !!row.disableAbilities,
     disableHeldItems: !!row.disableHeldItems
   });
 });
 
 app.post("/api/games", async (req, res) => {
-  const data = gameSchema.parse(req.body);
-  const [row] = await db
-    .insert(games)
-    .values({
-      name: data.name,
-      notes: data.notes ?? null,
-      packId: data.packId,
-      disableAbilities: data.disableAbilities ? 1 : 0,
-      disableHeldItems: data.disableHeldItems ? 1 : 0
-    })
-    .returning();
+  const data = gameCreateSchema.parse(req.body);
+  const packIds = data.packIds.filter((value, idx, arr) => arr.indexOf(value) === idx);
+  const packsCount = await db.select({ id: packs.id }).from(packs).where(inArray(packs.id, packIds));
+  if (packsCount.length !== packIds.length) {
+    return res.status(400).json({ error: "One or more packs do not exist." });
+  }
 
-  const packSpeciesRows = await db.select({ id: packSpecies.id }).from(packSpecies).where(eq(packSpecies.packId, data.packId));
-  const packAbilitiesRows = await db
-    .select({ id: packAbilities.id })
-    .from(packAbilities)
-    .where(eq(packAbilities.packId, data.packId));
-  const packItemsRows = await db.select({ id: packItems.id }).from(packItems).where(eq(packItems.packId, data.packId));
+  const result = db.transaction((tx) => {
+    const newGame = tx
+      .insert(games)
+      .values({
+        name: data.name,
+        notes: data.notes ?? null,
+        disableAbilities: data.disableAbilities ? 1 : 0,
+        disableHeldItems: data.disableHeldItems ? 1 : 0
+      })
+      .returning()
+      .get();
 
-  if (packSpeciesRows.length > 0) {
-    await db.insert(gameSpecies).values(packSpeciesRows.map((s) => ({ gameId: row.id, speciesId: s.id })));
-  }
-  if (packAbilitiesRows.length > 0) {
-    await db.insert(gameAbilities).values(packAbilitiesRows.map((a) => ({ gameId: row.id, abilityId: a.id })));
-  }
-  if (packItemsRows.length > 0) {
-    await db.insert(gameItems).values(packItemsRows.map((i) => ({ gameId: row.id, itemId: i.id })));
-  }
+    buildGameData(tx, newGame.id, packIds);
+    return newGame;
+  });
+
+  const packsStack = await getGamePackStack(result.id);
+  const useSingleSpecial = await getGameUseSingleSpecial(result.id);
   res.json({
-    ...row,
-    disableAbilities: !!row.disableAbilities,
-    disableHeldItems: !!row.disableHeldItems
+    ...result,
+    packIds: packsStack.map((p) => p.packId),
+    packNames: packsStack.map((p) => p.name),
+    useSingleSpecial,
+    disableAbilities: !!result.disableAbilities,
+    disableHeldItems: !!result.disableHeldItems
   });
 });
 
 app.put("/api/games/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  const data = gameSchema.parse(req.body);
+  const data = gameUpdateSchema.parse(req.body);
   const [row] = await db
     .update(games)
     .set({
       name: data.name,
       notes: data.notes ?? null,
-      packId: data.packId,
       disableAbilities: data.disableAbilities ? 1 : 0,
       disableHeldItems: data.disableHeldItems ? 1 : 0
     })
     .where(eq(games.id, id))
     .returning();
+
+  const packsStack = await getGamePackStack(id);
+  const useSingleSpecial = await getGameUseSingleSpecial(id);
   res.json({
     ...row,
+    packIds: packsStack.map((p) => p.packId),
+    packNames: packsStack.map((p) => p.name),
+    useSingleSpecial,
     disableAbilities: !!row.disableAbilities,
     disableHeldItems: !!row.disableHeldItems
   });
@@ -829,61 +1250,126 @@ app.delete("/api/games/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   await db.delete(teamSlots).where(eq(teamSlots.gameId, id));
   await db.delete(boxPokemon).where(eq(boxPokemon.gameId, id));
+  await db.delete(trackedBox).where(eq(trackedBox.gameId, id));
+  await db.delete(gameAllowedSpecies).where(eq(gameAllowedSpecies.gameId, id));
+  await db.delete(gameAllowedAbilities).where(eq(gameAllowedAbilities.gameId, id));
+  await db.delete(gameAllowedItems).where(eq(gameAllowedItems.gameId, id));
   await db.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.gameId, id));
-  await db.delete(gameSpeciesOverrides).where(eq(gameSpeciesOverrides.gameId, id));
+  await db.delete(gameSpeciesEvolutions).where(eq(gameSpeciesEvolutions.gameId, id));
   await db.delete(gameSpecies).where(eq(gameSpecies.gameId, id));
   await db.delete(gameAbilities).where(eq(gameAbilities.gameId, id));
   await db.delete(gameItems).where(eq(gameItems.gameId, id));
+  await db.delete(gameTypeEffectiveness).where(eq(gameTypeEffectiveness.gameId, id));
+  await db.delete(gameTypes).where(eq(gameTypes.gameId, id));
+  await db.delete(gamePacks).where(eq(gamePacks.gameId, id));
   await db.delete(games).where(eq(games.id, id));
   res.json({ ok: true });
 });
 
 app.get("/api/games/:id/allowed-species", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  const rows = await db.select().from(gameSpecies).where(eq(gameSpecies.gameId, id));
+  const rows = await db.select().from(gameAllowedSpecies).where(eq(gameAllowedSpecies.gameId, id));
   res.json(rows.map((r) => r.speciesId));
 });
 
 app.put("/api/games/:id/allowed-species", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const data = allowedSchema.parse(req.body);
-  await db.delete(gameSpecies).where(eq(gameSpecies.gameId, id));
+  await db.delete(gameAllowedSpecies).where(eq(gameAllowedSpecies.gameId, id));
   if (data.ids.length > 0) {
-    await db.insert(gameSpecies).values(data.ids.map((speciesId) => ({ gameId: id, speciesId })));
+    await db.insert(gameAllowedSpecies).values(data.ids.map((speciesId) => ({ gameId: id, speciesId })));
   }
   res.json({ ok: true });
 });
 
 app.get("/api/games/:id/allowed-abilities", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  const rows = await db.select().from(gameAbilities).where(eq(gameAbilities.gameId, id));
+  const rows = await db.select().from(gameAllowedAbilities).where(eq(gameAllowedAbilities.gameId, id));
   res.json(rows.map((r) => r.abilityId));
 });
 
 app.put("/api/games/:id/allowed-abilities", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const data = allowedSchema.parse(req.body);
-  await db.delete(gameAbilities).where(eq(gameAbilities.gameId, id));
+  await db.delete(gameAllowedAbilities).where(eq(gameAllowedAbilities.gameId, id));
   if (data.ids.length > 0) {
-    await db.insert(gameAbilities).values(data.ids.map((abilityId) => ({ gameId: id, abilityId })));
+    await db.insert(gameAllowedAbilities).values(data.ids.map((abilityId) => ({ gameId: id, abilityId })));
   }
   res.json({ ok: true });
 });
 
 app.get("/api/games/:id/allowed-items", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  const rows = await db.select().from(gameItems).where(eq(gameItems.gameId, id));
+  const rows = await db.select().from(gameAllowedItems).where(eq(gameAllowedItems.gameId, id));
   res.json(rows.map((r) => r.itemId));
 });
 
 app.put("/api/games/:id/allowed-items", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const data = allowedSchema.parse(req.body);
-  await db.delete(gameItems).where(eq(gameItems.gameId, id));
+  await db.delete(gameAllowedItems).where(eq(gameAllowedItems.gameId, id));
   if (data.ids.length > 0) {
-    await db.insert(gameItems).values(data.ids.map((itemId) => ({ gameId: id, itemId })));
+    await db.insert(gameAllowedItems).values(data.ids.map((itemId) => ({ gameId: id, itemId })));
   }
   res.json({ ok: true });
+});
+
+app.get("/api/games/:id/types", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId)).orderBy(gameTypes.name);
+  res.json(
+    rows.map((row) => ({
+      ...row,
+      excludeInChart: !!row.excludeInChart
+    }))
+  );
+});
+
+app.get("/api/games/:id/species", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const { typeNameById } = await getGameTypesMap(gameId);
+  const rows = await db
+    .select()
+    .from(gameSpecies)
+    .where(eq(gameSpecies.gameId, gameId))
+    .orderBy(gameSpecies.dexNumber, gameSpecies.name);
+  const withNames = rows.map((row) => ({
+    ...row,
+    type1Name: typeNameById.get(row.type1Id) ?? null,
+    type2Name: row.type2Id ? typeNameById.get(row.type2Id) ?? null : null
+  }));
+  res.json(withNames);
+});
+
+app.get("/api/games/:id/abilities", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(gameAbilities).where(eq(gameAbilities.gameId, gameId)).orderBy(gameAbilities.name);
+  res.json(rows);
+});
+
+app.get("/api/games/:id/items", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(gameItems).where(eq(gameItems.gameId, gameId)).orderBy(gameItems.name);
+  res.json(rows);
+});
+
+app.get("/api/games/:id/species-abilities", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const rows = await db.select().from(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.gameId, gameId));
+  res.json(rows);
+});
+
+app.get("/api/games/:id/species-evolutions", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const fromSpeciesId = typeof req.query.fromSpeciesId === "string" ? Number(req.query.fromSpeciesId) : null;
+  const rows =
+    Number.isFinite(fromSpeciesId) && fromSpeciesId
+      ? await db
+          .select()
+          .from(gameSpeciesEvolutions)
+          .where(and(eq(gameSpeciesEvolutions.gameId, gameId), eq(gameSpeciesEvolutions.fromSpeciesId, fromSpeciesId)))
+      : await db.select().from(gameSpeciesEvolutions).where(eq(gameSpeciesEvolutions.gameId, gameId));
+  res.json(rows);
 });
 
 app.get("/api/games/:id/dex", async (req, res) => {
@@ -896,55 +1382,32 @@ app.get("/api/games/:id/dex", async (req, res) => {
 
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
-  const packId = game[0].packId;
-  const pack = await getPackById(packId);
-  const useSingleSpecial = pack?.useSingleSpecial ?? false;
+  const useSingleSpecial = await getGameUseSingleSpecial(gameId);
 
-  const { typesList, typeNameById } = await getPackTypesMap(packId);
+  const typesList = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId));
+  const typeNameById = new Map(typesList.map((t) => [t.id, t.name]));
 
   const rows = await db
     .select({
-      speciesId: packSpecies.id,
-      dexNumber: packSpecies.dexNumber,
-      baseSpeciesId: packSpecies.baseSpeciesId,
-      name: packSpecies.name,
-      type1Id: packSpecies.type1Id,
-      type2Id: packSpecies.type2Id,
-      hp: packSpecies.hp,
-      atk: packSpecies.atk,
-      def: packSpecies.def,
-      spa: packSpecies.spa,
-      spd: packSpecies.spd,
-      spe: packSpecies.spe,
-      oType1Id: gameSpeciesOverrides.type1Id,
-      oType2Id: gameSpeciesOverrides.type2Id,
-      oHp: gameSpeciesOverrides.hp,
-      oAtk: gameSpeciesOverrides.atk,
-      oDef: gameSpeciesOverrides.def,
-      oSpa: gameSpeciesOverrides.spa,
-      oSpd: gameSpeciesOverrides.spd,
-      oSpe: gameSpeciesOverrides.spe
+      speciesId: gameSpecies.id,
+      dexNumber: gameSpecies.dexNumber,
+      baseSpeciesId: gameSpecies.baseSpeciesId,
+      name: gameSpecies.name,
+      type1Id: gameSpecies.type1Id,
+      type2Id: gameSpecies.type2Id,
+      hp: gameSpecies.hp,
+      atk: gameSpecies.atk,
+      def: gameSpecies.def,
+      spa: gameSpecies.spa,
+      spd: gameSpecies.spd,
+      spe: gameSpecies.spe
     })
-    .from(gameSpecies)
-    .innerJoin(packSpecies, eq(gameSpecies.speciesId, packSpecies.id))
-    .leftJoin(
-      gameSpeciesOverrides,
-      and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
-    )
-    .where(eq(gameSpecies.gameId, gameId))
-    .orderBy(packSpecies.dexNumber, packSpecies.name);
+    .from(gameAllowedSpecies)
+    .innerJoin(gameSpecies, eq(gameAllowedSpecies.speciesId, gameSpecies.id))
+    .where(eq(gameAllowedSpecies.gameId, gameId))
+    .orderBy(gameSpecies.dexNumber, gameSpecies.name);
 
   const normalized = rows
-    .map((row) => applySpeciesOverride(row, {
-      type1Id: row.oType1Id,
-      type2Id: row.oType2Id,
-      hp: row.oHp,
-      atk: row.oAtk,
-      def: row.oDef,
-      spa: row.oSpa,
-      spd: row.oSpd,
-      spe: row.oSpe
-    }))
     .map((row) => ({
       id: row.speciesId,
       dexNumber: row.dexNumber,
@@ -989,14 +1452,16 @@ app.get("/api/games/:id/box", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
-  const packId = game[0].packId;
   const disableAbilities = !!game[0].disableAbilities;
   const disableHeldItems = !!game[0].disableHeldItems;
-  const pack = await getPackById(packId);
-  const useSingleSpecial = pack?.useSingleSpecial ?? false;
+  const useSingleSpecial = await getGameUseSingleSpecial(gameId);
 
-  const { typesList, typeNameById } = await getPackTypesMap(packId);
-  const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
+  const typesList = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId));
+  const typeNameById = new Map(typesList.map((t) => [t.id, t.name]));
+  const chartRows = await db
+    .select()
+    .from(gameTypeEffectiveness)
+    .where(eq(gameTypeEffectiveness.gameId, gameId));
   const scoringTypes = typesList.filter((t) => !t.excludeInChart);
 
   const rows = await db
@@ -1007,99 +1472,67 @@ app.get("/api/games/:id/box", async (req, res) => {
       abilityId: boxPokemon.abilityId,
       itemId: boxPokemon.itemId,
       nickname: boxPokemon.nickname,
-      speciesName: packSpecies.name,
-      type1Id: packSpecies.type1Id,
-      type2Id: packSpecies.type2Id,
-      hp: packSpecies.hp,
-      atk: packSpecies.atk,
-      def: packSpecies.def,
-      spa: packSpecies.spa,
-      spd: packSpecies.spd,
-      spe: packSpecies.spe,
-      oType1Id: gameSpeciesOverrides.type1Id,
-      oType2Id: gameSpeciesOverrides.type2Id,
-      oHp: gameSpeciesOverrides.hp,
-      oAtk: gameSpeciesOverrides.atk,
-      oDef: gameSpeciesOverrides.def,
-      oSpa: gameSpeciesOverrides.spa,
-      oSpd: gameSpeciesOverrides.spd,
-      oSpe: gameSpeciesOverrides.spe,
-      abilityName: packAbilities.name,
-      abilityTags: packAbilities.tags,
-      itemName: packItems.name,
-      itemTags: packItems.tags
+      speciesName: gameSpecies.name,
+      type1Id: gameSpecies.type1Id,
+      type2Id: gameSpecies.type2Id,
+      hp: gameSpecies.hp,
+      atk: gameSpecies.atk,
+      def: gameSpecies.def,
+      spa: gameSpecies.spa,
+      spd: gameSpecies.spd,
+      spe: gameSpecies.spe,
+      abilityName: gameAbilities.name,
+      abilityTags: gameAbilities.tags,
+      itemName: gameItems.name,
+      itemTags: gameItems.tags
     })
     .from(boxPokemon)
-    .innerJoin(packSpecies, eq(boxPokemon.speciesId, packSpecies.id))
-    .leftJoin(
-      gameSpeciesOverrides,
-      and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
-    )
-    .leftJoin(packAbilities, eq(boxPokemon.abilityId, packAbilities.id))
-    .leftJoin(packItems, eq(boxPokemon.itemId, packItems.id))
+    .innerJoin(gameSpecies, eq(boxPokemon.speciesId, gameSpecies.id))
+    .leftJoin(gameAbilities, eq(boxPokemon.abilityId, gameAbilities.id))
+    .leftJoin(gameItems, eq(boxPokemon.itemId, gameItems.id))
     .where(eq(boxPokemon.gameId, gameId))
-    .orderBy(packSpecies.name);
+    .orderBy(gameSpecies.name);
 
-  const withScores = await Promise.all(
-    rows.map(async (row) => {
-      const effective = applySpeciesOverride(row, {
-        type1Id: row.oType1Id,
-        type2Id: row.oType2Id,
-        hp: row.oHp,
-        atk: row.oAtk,
-        def: row.oDef,
-        spa: row.oSpa,
-        spd: row.oSpd,
-        spe: row.oSpe
-      });
-
-      const tags = [
-        ...(disableAbilities ? [] : parseTags(row.abilityTags)),
-        ...(disableHeldItems ? [] : parseTags(row.itemTags))
-      ];
-      const effectiveSpd = useSingleSpecial ? effective.spa : effective.spd;
-      const potentials = computePotentials(
-        {
-          hp: effective.hp,
-          atk: effective.atk,
-          def: effective.def,
-          spa: effective.spa,
-          spd: effectiveSpd,
-          spe: effective.spe
-        },
-        tags,
-        effective.type1Id,
-        effective.type2Id ?? null,
-        scoringTypes.map((t) => ({ id: t.id, name: t.name, color: t.color ?? null })),
-        chartRows.map((r) => ({
-          attackingTypeId: r.attackingTypeId,
-          defendingTypeId: r.defendingTypeId,
-          multiplier: r.multiplier
-        }))
-      );
-
-      return {
-        ...row,
-        abilityId: disableAbilities ? null : row.abilityId,
-        abilityName: disableAbilities ? null : row.abilityName,
-        abilityTags: disableAbilities ? null : row.abilityTags,
-        itemId: disableHeldItems ? null : row.itemId,
-        itemName: disableHeldItems ? null : row.itemName,
-        itemTags: disableHeldItems ? null : row.itemTags,
-        type1Id: effective.type1Id,
-        type2Id: effective.type2Id,
-        hp: effective.hp,
-        atk: effective.atk,
-        def: effective.def,
-        spa: effective.spa,
+  const withScores = rows.map((row) => {
+    const tags = [
+      ...(disableAbilities ? [] : parseTags(row.abilityTags)),
+      ...(disableHeldItems ? [] : parseTags(row.itemTags))
+    ];
+    const effectiveSpd = useSingleSpecial ? row.spa : row.spd;
+    const potentials = computePotentials(
+      {
+        hp: row.hp,
+        atk: row.atk,
+        def: row.def,
+        spa: row.spa,
         spd: effectiveSpd,
-        spe: effective.spe,
-        type1Name: typeNameById.get(effective.type1Id) ?? null,
-        type2Name: effective.type2Id ? typeNameById.get(effective.type2Id) ?? null : null,
-        potentials
-      };
-    })
-  );
+        spe: row.spe
+      },
+      tags,
+      row.type1Id,
+      row.type2Id ?? null,
+      scoringTypes.map((t) => ({ id: t.id, name: t.name, color: t.color ?? null })),
+      chartRows.map((r) => ({
+        attackingTypeId: r.attackingTypeId,
+        defendingTypeId: r.defendingTypeId,
+        multiplier: r.multiplier
+      }))
+    );
+
+    return {
+      ...row,
+      abilityId: disableAbilities ? null : row.abilityId,
+      abilityName: disableAbilities ? null : row.abilityName,
+      abilityTags: disableAbilities ? null : row.abilityTags,
+      itemId: disableHeldItems ? null : row.itemId,
+      itemName: disableHeldItems ? null : row.itemName,
+      itemTags: disableHeldItems ? null : row.itemTags,
+      spd: effectiveSpd,
+      type1Name: typeNameById.get(row.type1Id) ?? null,
+      type2Name: row.type2Id ? typeNameById.get(row.type2Id) ?? null : null,
+      potentials
+    };
+  });
 
   res.json(withScores);
 });
@@ -1159,15 +1592,15 @@ app.put("/api/games/:id/box/:boxId/evolve", async (req, res) => {
   if (!gameRow) return res.status(404).json({ error: "Game not found" });
 
   const [targetSpecies] = await db
-    .select({ id: packSpecies.id })
-    .from(packSpecies)
-    .where(and(eq(packSpecies.id, data.toSpeciesId), eq(packSpecies.packId, gameRow.packId)));
-  if (!targetSpecies) return res.status(400).json({ error: "Target species not in this pack." });
+    .select({ id: gameSpecies.id })
+    .from(gameSpecies)
+    .where(and(eq(gameSpecies.id, data.toSpeciesId), eq(gameSpecies.gameId, gameId)));
+  if (!targetSpecies) return res.status(400).json({ error: "Target species not in this game." });
 
   const [allowed] = await db
-    .select({ speciesId: gameSpecies.speciesId })
-    .from(gameSpecies)
-    .where(and(eq(gameSpecies.gameId, gameId), eq(gameSpecies.speciesId, data.toSpeciesId)));
+    .select({ speciesId: gameAllowedSpecies.speciesId })
+    .from(gameAllowedSpecies)
+    .where(and(eq(gameAllowedSpecies.gameId, gameId), eq(gameAllowedSpecies.speciesId, data.toSpeciesId)));
   if (!allowed) return res.status(400).json({ error: "Target species not allowed in this game." });
 
   const [row] = await db
@@ -1197,11 +1630,11 @@ app.get("/api/games/:id/tracked", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
-  const packId = game[0].packId;
   const disableAbilities = !!game[0].disableAbilities;
   const disableHeldItems = !!game[0].disableHeldItems;
 
-  const { typeNameById } = await getPackTypesMap(packId);
+  const typeRows = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId));
+  const typeNameById = new Map(typeRows.map((t) => [t.id, t.name]));
 
   const rows = await db
     .select({
@@ -1211,42 +1644,28 @@ app.get("/api/games/:id/tracked", async (req, res) => {
       abilityId: trackedBox.abilityId,
       itemId: trackedBox.itemId,
       nickname: trackedBox.nickname,
-      speciesName: packSpecies.name,
-      type1Id: packSpecies.type1Id,
-      type2Id: packSpecies.type2Id,
-      oType1Id: gameSpeciesOverrides.type1Id,
-      oType2Id: gameSpeciesOverrides.type2Id,
-      abilityName: packAbilities.name,
-      itemName: packItems.name
+      speciesName: gameSpecies.name,
+      type1Id: gameSpecies.type1Id,
+      type2Id: gameSpecies.type2Id,
+      abilityName: gameAbilities.name,
+      itemName: gameItems.name
     })
     .from(trackedBox)
-    .innerJoin(packSpecies, eq(trackedBox.speciesId, packSpecies.id))
-    .leftJoin(
-      gameSpeciesOverrides,
-      and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
-    )
-    .leftJoin(packAbilities, eq(trackedBox.abilityId, packAbilities.id))
-    .leftJoin(packItems, eq(trackedBox.itemId, packItems.id))
+    .innerJoin(gameSpecies, eq(trackedBox.speciesId, gameSpecies.id))
+    .leftJoin(gameAbilities, eq(trackedBox.abilityId, gameAbilities.id))
+    .leftJoin(gameItems, eq(trackedBox.itemId, gameItems.id))
     .where(eq(trackedBox.gameId, gameId))
-    .orderBy(packSpecies.name);
+    .orderBy(gameSpecies.name);
 
-  const normalized = rows.map((row) => {
-    const effective = applySpeciesOverride(row, {
-      type1Id: row.oType1Id,
-      type2Id: row.oType2Id
-    });
-    return {
-      ...row,
-      abilityId: disableAbilities ? null : row.abilityId,
-      abilityName: disableAbilities ? null : row.abilityName,
-      itemId: disableHeldItems ? null : row.itemId,
-      itemName: disableHeldItems ? null : row.itemName,
-      type1Id: effective.type1Id,
-      type2Id: effective.type2Id,
-      type1Name: typeNameById.get(effective.type1Id) ?? null,
-      type2Name: effective.type2Id ? typeNameById.get(effective.type2Id) ?? null : null
-    };
-  });
+  const normalized = rows.map((row) => ({
+    ...row,
+    abilityId: disableAbilities ? null : row.abilityId,
+    abilityName: disableAbilities ? null : row.abilityName,
+    itemId: disableHeldItems ? null : row.itemId,
+    itemName: disableHeldItems ? null : row.itemName,
+    type1Name: typeNameById.get(row.type1Id) ?? null,
+    type2Name: row.type2Id ? typeNameById.get(row.type2Id) ?? null : null
+  }));
 
   res.json(normalized);
 });
@@ -1332,7 +1751,6 @@ async function buildTeamData(
 ) {
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return null;
-  const packId = game[0].packId;
   const disableAbilities = !!game[0].disableAbilities;
   const disableHeldItems = !!game[0].disableHeldItems;
 
@@ -1352,33 +1770,28 @@ async function buildTeamData(
           id: boxPokemon.id,
           nickname: boxPokemon.nickname,
           speciesId: boxPokemon.speciesId,
-          speciesName: packSpecies.name,
-          abilityTags: packAbilities.tags,
-          itemTags: packItems.tags,
-          type1Id: packSpecies.type1Id,
-          type2Id: packSpecies.type2Id,
-          oType1Id: gameSpeciesOverrides.type1Id,
-          oType2Id: gameSpeciesOverrides.type2Id
+          speciesName: gameSpecies.name,
+          abilityTags: gameAbilities.tags,
+          itemTags: gameItems.tags,
+          type1Id: gameSpecies.type1Id,
+          type2Id: gameSpecies.type2Id
         })
         .from(boxPokemon)
-        .innerJoin(packSpecies, eq(boxPokemon.speciesId, packSpecies.id))
-        .leftJoin(
-          gameSpeciesOverrides,
-          and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
-        )
-        .leftJoin(packAbilities, eq(boxPokemon.abilityId, packAbilities.id))
-        .leftJoin(packItems, eq(boxPokemon.itemId, packItems.id))
+        .innerJoin(gameSpecies, eq(boxPokemon.speciesId, gameSpecies.id))
+        .leftJoin(gameAbilities, eq(boxPokemon.abilityId, gameAbilities.id))
+        .leftJoin(gameItems, eq(boxPokemon.itemId, gameItems.id))
         .where(inArray(boxPokemon.id, selectedIds))
     : [];
 
-  const { typesList, typeNameById } = await getPackTypesMap(packId);
-  const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
+  const typesList = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId));
+  const typeNameById = new Map(typesList.map((t) => [t.id, t.name]));
+  const chartRows = await db.select().from(gameTypeEffectiveness).where(eq(gameTypeEffectiveness.gameId, gameId));
   const visibleTypes = typesList.filter((t) => !t.excludeInChart);
 
   const membersByBoxId = new Map(
     memberRows.map((m) => {
-      const type1Id = m.oType1Id ?? m.type1Id;
-      const type2Id = m.oType2Id ?? m.type2Id ?? null;
+      const type1Id = m.type1Id;
+      const type2Id = m.type2Id ?? null;
       return [
         m.id,
         {

@@ -125,7 +125,6 @@ export const games = sqliteTable(
   "games",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    packId: integer("pack_id").notNull().references(() => packs.id),
     name: text("name").notNull(),
     notes: text("notes"),
     disableAbilities: integer("disable_abilities").notNull().default(0),
@@ -136,55 +135,92 @@ export const games = sqliteTable(
   })
 );
 
+export const gamePacks = sqliteTable(
+  "game_packs",
+  {
+    gameId: integer("game_id").notNull().references(() => games.id),
+    packId: integer("pack_id").notNull().references(() => packs.id),
+    sortOrder: integer("sort_order").notNull()
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.gameId, t.packId] }),
+    orderIdx: uniqueIndex("game_packs_game_sort_idx").on(t.gameId, t.sortOrder)
+  })
+);
+
+export const gameTypes = sqliteTable(
+  "game_types",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    gameId: integer("game_id").notNull().references(() => games.id),
+    name: text("name").notNull(),
+    metadata: text("metadata"),
+    color: text("color"),
+    excludeInChart: integer("exclude_in_chart").notNull().default(0)
+  },
+  (t) => ({
+    gameTypeIdx: uniqueIndex("game_types_game_name_idx").on(t.gameId, t.name)
+  })
+);
+
+export const gameTypeEffectiveness = sqliteTable(
+  "game_type_effectiveness",
+  {
+    gameId: integer("game_id").notNull().references(() => games.id),
+    attackingTypeId: integer("attacking_type_id").notNull().references(() => gameTypes.id),
+    defendingTypeId: integer("defending_type_id").notNull().references(() => gameTypes.id),
+    multiplier: real("multiplier").notNull()
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.gameId, t.attackingTypeId, t.defendingTypeId] })
+  })
+);
+
 export const gameSpecies = sqliteTable(
   "game_species",
   {
+    id: integer("id").primaryKey({ autoIncrement: true }),
     gameId: integer("game_id").notNull().references(() => games.id),
-    speciesId: integer("species_id").notNull().references(() => packSpecies.id)
+    dexNumber: integer("dex_number").notNull().default(1),
+    baseSpeciesId: integer("base_species_id").references(() => gameSpecies.id),
+    name: text("name").notNull(),
+    type1Id: integer("type1_id").notNull().references(() => gameTypes.id),
+    type2Id: integer("type2_id").references(() => gameTypes.id),
+    hp: integer("hp").notNull(),
+    atk: integer("atk").notNull(),
+    def: integer("def").notNull(),
+    spa: integer("spa").notNull(),
+    spd: integer("spd").notNull(),
+    spe: integer("spe").notNull()
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.gameId, t.speciesId] })
+    gameSpeciesIdx: uniqueIndex("game_species_game_name_idx").on(t.gameId, t.name)
   })
 );
 
 export const gameAbilities = sqliteTable(
   "game_abilities",
   {
+    id: integer("id").primaryKey({ autoIncrement: true }),
     gameId: integer("game_id").notNull().references(() => games.id),
-    abilityId: integer("ability_id").notNull().references(() => packAbilities.id)
+    name: text("name").notNull(),
+    tags: text("tags").notNull().default("[]")
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.gameId, t.abilityId] })
+    gameAbilityIdx: uniqueIndex("game_abilities_game_name_idx").on(t.gameId, t.name)
   })
 );
 
 export const gameItems = sqliteTable(
   "game_items",
   {
+    id: integer("id").primaryKey({ autoIncrement: true }),
     gameId: integer("game_id").notNull().references(() => games.id),
-    itemId: integer("item_id").notNull().references(() => packItems.id)
+    name: text("name").notNull(),
+    tags: text("tags").notNull().default("[]")
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.gameId, t.itemId] })
-  })
-);
-
-export const gameSpeciesOverrides = sqliteTable(
-  "game_species_overrides",
-  {
-    gameId: integer("game_id").notNull().references(() => games.id),
-    speciesId: integer("species_id").notNull().references(() => packSpecies.id),
-    type1Id: integer("type1_id").references(() => packTypes.id),
-    type2Id: integer("type2_id").references(() => packTypes.id),
-    hp: integer("hp"),
-    atk: integer("atk"),
-    def: integer("def"),
-    spa: integer("spa"),
-    spd: integer("spd"),
-    spe: integer("spe")
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.gameId, t.speciesId] })
+    gameItemIdx: uniqueIndex("game_items_game_name_idx").on(t.gameId, t.name)
   })
 );
 
@@ -192,12 +228,64 @@ export const gameSpeciesAbilities = sqliteTable(
   "game_species_abilities",
   {
     gameId: integer("game_id").notNull().references(() => games.id),
-    speciesId: integer("species_id").notNull().references(() => packSpecies.id),
-    abilityId: integer("ability_id").notNull().references(() => packAbilities.id),
+    speciesId: integer("species_id").notNull().references(() => gameSpecies.id),
+    abilityId: integer("ability_id").notNull().references(() => gameAbilities.id),
     slot: text("slot").notNull()
   },
   (t) => ({
     pk: primaryKey({ columns: [t.gameId, t.speciesId, t.abilityId, t.slot] })
+  })
+);
+
+export const gameSpeciesEvolutions = sqliteTable(
+  "game_species_evolutions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    gameId: integer("game_id").notNull().references(() => games.id),
+    fromSpeciesId: integer("from_species_id").notNull().references(() => gameSpecies.id),
+    toSpeciesId: integer("to_species_id").notNull().references(() => gameSpecies.id),
+    method: text("method").notNull()
+  },
+  (t) => ({
+    gameEvoIdx: uniqueIndex("game_species_evo_game_from_to_method_idx").on(
+      t.gameId,
+      t.fromSpeciesId,
+      t.toSpeciesId,
+      t.method
+    )
+  })
+);
+
+export const gameAllowedSpecies = sqliteTable(
+  "game_allowed_species",
+  {
+    gameId: integer("game_id").notNull().references(() => games.id),
+    speciesId: integer("species_id").notNull().references(() => gameSpecies.id)
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.gameId, t.speciesId] })
+  })
+);
+
+export const gameAllowedAbilities = sqliteTable(
+  "game_allowed_abilities",
+  {
+    gameId: integer("game_id").notNull().references(() => games.id),
+    abilityId: integer("ability_id").notNull().references(() => gameAbilities.id)
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.gameId, t.abilityId] })
+  })
+);
+
+export const gameAllowedItems = sqliteTable(
+  "game_allowed_items",
+  {
+    gameId: integer("game_id").notNull().references(() => games.id),
+    itemId: integer("item_id").notNull().references(() => gameItems.id)
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.gameId, t.itemId] })
   })
 );
 
@@ -206,9 +294,9 @@ export const boxPokemon = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     gameId: integer("game_id").notNull().references(() => games.id),
-    speciesId: integer("species_id").notNull().references(() => packSpecies.id),
-    abilityId: integer("ability_id").references(() => packAbilities.id),
-    itemId: integer("item_id").references(() => packItems.id),
+    speciesId: integer("species_id").notNull().references(() => gameSpecies.id),
+    abilityId: integer("ability_id").references(() => gameAbilities.id),
+    itemId: integer("item_id").references(() => gameItems.id),
     nickname: text("nickname")
   }
 );
@@ -218,9 +306,9 @@ export const trackedBox = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     gameId: integer("game_id").notNull().references(() => games.id),
-    speciesId: integer("species_id").notNull().references(() => packSpecies.id),
-    abilityId: integer("ability_id").references(() => packAbilities.id),
-    itemId: integer("item_id").references(() => packItems.id),
+    speciesId: integer("species_id").notNull().references(() => gameSpecies.id),
+    abilityId: integer("ability_id").references(() => gameAbilities.id),
+    itemId: integer("item_id").references(() => gameItems.id),
     nickname: text("nickname")
   }
 );

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
@@ -32,6 +32,8 @@ export default function PackTypes() {
   const [ruleMult, setRuleMult] = useState<number>(2);
   const [hoverAtkId, setHoverAtkId] = useState<number | null>(null);
   const [hoverDefId, setHoverDefId] = useState<number | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const createType = useMutation({
     mutationFn: (payload: { name: string; color: string | null; excludeInChart: boolean }) =>
@@ -54,6 +56,30 @@ export default function PackTypes() {
     mutationFn: (idValue: number) => api.del(`/packs/${packId}/types/${idValue}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
   });
+
+  async function exportTypeChart() {
+    const payload = await api.get(`/packs/${packId}/typechart/export`);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `pack-${packId}-types.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImport(file: File) {
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      await api.post(`/packs/${packId}/typechart/import`, json);
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] });
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "typechart"] });
+    } finally {
+      setImportBusy(false);
+    }
+  }
 
   const chartMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -125,6 +151,30 @@ export default function PackTypes() {
             }}
           >
             Add
+          </Button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button type="button" onClick={exportTypeChart}>
+            Export Types + Chart
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              void handleImport(file);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            disabled={importBusy}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {importBusy ? "Importing..." : "Import Types + Chart"}
           </Button>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">

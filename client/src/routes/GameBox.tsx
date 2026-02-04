@@ -6,12 +6,12 @@ import { api } from "../lib/api";
 import {
   BoxRow,
   GameRow,
-  PackAbilityRow,
-  PackItemRow,
-  PackSpeciesAbilityRow,
-  PackSpeciesEvolutionRow,
-  PackSpeciesRow,
-  PackTypeRow,
+  GameAbilityRow,
+  GameItemRow,
+  GameSpeciesAbilityRow,
+  GameSpeciesEvolutionRow,
+  GameSpeciesRow,
+  GameTypeRow,
   TrackedRow
 } from "../lib/types";
 import { Button, Card, CardHeader, Input, Select, Modal, GhostButton, TypePill } from "../components/ui";
@@ -59,7 +59,7 @@ export default function GameBox() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmClearTrackedOpen, setConfirmClearTrackedOpen] = useState(false);
   const [evolveOpen, setEvolveOpen] = useState(false);
-  const [evolveTargets, setEvolveTargets] = useState<PackSpeciesEvolutionRow[]>([]);
+  const [evolveTargets, setEvolveTargets] = useState<GameSpeciesEvolutionRow[]>([]);
   const [evolveBoxId, setEvolveBoxId] = useState<number | null>(null);
   const [evolveTargetId, setEvolveTargetId] = useState<number | "">("");
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -73,8 +73,6 @@ export default function GameBox() {
     queryKey: ["games", gameId],
     queryFn: () => api.get(`/games/${gameId}`)
   });
-
-  const packId = game?.packId ?? 0;
 
   const { data: box = [] } = useQuery<BoxRow[]>({
     queryKey: ["games", gameId, "box"],
@@ -106,35 +104,35 @@ export default function GameBox() {
     queryFn: () => api.get(`/games/${gameId}/allowed-items`)
   });
 
-  const { data: species = [] } = useQuery<PackSpeciesRow[]>({
-    queryKey: ["packs", packId, "species"],
-    queryFn: () => api.get(`/packs/${packId}/species`),
-    enabled: !!packId
+  const { data: species = [] } = useQuery<GameSpeciesRow[]>({
+    queryKey: ["games", gameId, "species"],
+    queryFn: () => api.get(`/games/${gameId}/species`),
+    enabled: !!gameId
   });
-  const { data: abilities = [] } = useQuery<PackAbilityRow[]>({
-    queryKey: ["packs", packId, "abilities"],
-    queryFn: () => api.get(`/packs/${packId}/abilities`),
-    enabled: !!packId
+  const { data: abilities = [] } = useQuery<GameAbilityRow[]>({
+    queryKey: ["games", gameId, "abilities"],
+    queryFn: () => api.get(`/games/${gameId}/abilities`),
+    enabled: !!gameId
   });
-  const { data: items = [] } = useQuery<PackItemRow[]>({
-    queryKey: ["packs", packId, "items"],
-    queryFn: () => api.get(`/packs/${packId}/items`),
-    enabled: !!packId
+  const { data: items = [] } = useQuery<GameItemRow[]>({
+    queryKey: ["games", gameId, "items"],
+    queryFn: () => api.get(`/games/${gameId}/items`),
+    enabled: !!gameId
   });
-  const { data: types = [] } = useQuery<PackTypeRow[]>({
-    queryKey: ["packs", packId, "types"],
-    queryFn: () => api.get(`/packs/${packId}/types`),
-    enabled: !!packId
+  const { data: types = [] } = useQuery<GameTypeRow[]>({
+    queryKey: ["games", gameId, "types"],
+    queryFn: () => api.get(`/games/${gameId}/types`),
+    enabled: !!gameId
   });
-  const { data: speciesAbilities = [] } = useQuery<PackSpeciesAbilityRow[]>({
-    queryKey: ["packs", packId, "species-abilities"],
-    queryFn: () => api.get(`/packs/${packId}/species-abilities`),
-    enabled: !!packId
+  const { data: speciesAbilities = [] } = useQuery<GameSpeciesAbilityRow[]>({
+    queryKey: ["games", gameId, "species-abilities"],
+    queryFn: () => api.get(`/games/${gameId}/species-abilities`),
+    enabled: !!gameId
   });
-  const { data: evolutions = [] } = useQuery<PackSpeciesEvolutionRow[]>({
-    queryKey: ["packs", packId, "species-evolutions"],
-    queryFn: () => api.get(`/packs/${packId}/species-evolutions`),
-    enabled: !!packId
+  const { data: evolutions = [] } = useQuery<GameSpeciesEvolutionRow[]>({
+    queryKey: ["games", gameId, "species-evolutions"],
+    queryFn: () => api.get(`/games/${gameId}/species-evolutions`),
+    enabled: !!gameId
   });
 
   const allowedSpeciesList = species.filter((s) => allowedSpecies.includes(s.id));
@@ -246,7 +244,7 @@ export default function GameBox() {
   });
 
   const evolutionsBySpecies = useMemo(() => {
-    const map = new Map<number, PackSpeciesEvolutionRow[]>();
+    const map = new Map<number, GameSpeciesEvolutionRow[]>();
     evolutions.forEach((evo) => {
       const current = map.get(evo.fromSpeciesId) ?? [];
       current.push(evo);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,7 +11,6 @@ import { Button, Card, CardHeader, Input, Select } from "../components/ui";
 const schema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
-  packId: z.coerce.number().int(),
   disableAbilities: z.boolean().optional(),
   disableHeldItems: z.boolean().optional()
 });
@@ -28,23 +27,27 @@ export default function Games() {
     defaultValues: {
       name: "",
       notes: "",
-      packId: packs[0]?.id ?? 0,
       disableAbilities: false,
       disableHeldItems: false
     }
   });
 
+  const [selectedPackIds, setSelectedPackIds] = useState<number[]>([]);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [nextPackId, setNextPackId] = useState<number | "">("");
+
   useEffect(() => {
-    if (packs.length > 0) {
-      form.setValue("packId", packs[0].id);
+    if (packs.length > 0 && selectedPackIds.length === 0) {
+      setSelectedPackIds([packs[0].id]);
     }
-  }, [packs, form]);
+  }, [packs, selectedPackIds.length]);
 
   const create = useMutation({
-    mutationFn: (payload: FormValues) => api.post("/games", payload),
+    mutationFn: (payload: FormValues & { packIds: number[] }) => api.post("/games", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["games"] });
       form.reset();
+      setSelectedPackIds(packs[0]?.id ? [packs[0].id] : []);
     }
   });
 
@@ -63,20 +66,101 @@ export default function Games() {
   const [editNotes, setEditNotes] = useState("");
   const [editDisableAbilities, setEditDisableAbilities] = useState(false);
   const [editDisableHeldItems, setEditDisableHeldItems] = useState(false);
+
+  const availablePacks = useMemo(
+    () => packs.filter((pack) => !selectedPackIds.includes(pack.id)),
+    [packs, selectedPackIds]
+  );
+
+  function movePack(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const next = [...selectedPackIds];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setSelectedPackIds(next);
+  }
+
+  function addPack(packId: number) {
+    if (selectedPackIds.includes(packId)) return;
+    setSelectedPackIds((prev) => [...prev, packId]);
+  }
+
+  function removePack(packId: number) {
+    setSelectedPackIds((prev) => prev.filter((id) => id !== packId));
+  }
+
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
-        <CardHeader title="Create Game" subtitle="Choose a base pack for this game." />
-        <form className="space-y-3" onSubmit={form.handleSubmit((values) => create.mutate(values))}>
+        <CardHeader title="Create Game" subtitle="Choose and order packs for this game." />
+        <form
+          className="space-y-3"
+          onSubmit={form.handleSubmit((values) =>
+            create.mutate({
+              ...values,
+              packIds: selectedPackIds
+            })
+          )}
+        >
           <Input placeholder="Game name" {...form.register("name")} />
           <Input placeholder="Notes / rules" {...form.register("notes")} />
-          <Select {...form.register("packId")}>
-            {packs.map((pack) => (
-              <option key={pack.id} value={pack.id}>
-                {pack.name}
-              </option>
-            ))}
-          </Select>
+          <div className="space-y-2">
+            <div className="text-xs text-slate-500">Pack stack (last wins)</div>
+            <div className="space-y-2">
+              {selectedPackIds.length === 0 ? (
+                <div className="text-xs text-slate-500">No packs selected.</div>
+              ) : (
+                selectedPackIds.map((packId, index) => {
+                  const pack = packs.find((p) => p.id === packId);
+                  return (
+                    <div
+                      key={packId}
+                      className="flex items-center justify-between gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                      draggable
+                      onDragStart={() => setDragIndex(index)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (dragIndex === null) return;
+                        movePack(dragIndex, index);
+                        setDragIndex(null);
+                      }}
+                    >
+                      <span className="font-medium">{pack?.name ?? "Unknown Pack"}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="text-xs text-slate-400 hover:text-slate-600"
+                          onClick={() => removePack(packId)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Select value={nextPackId} onChange={(e) => setNextPackId(e.target.value ? Number(e.target.value) : "")}>
+                <option value="">Add pack</option>
+                {availablePacks.map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.name}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (typeof nextPackId !== "number") return;
+                  addPack(nextPackId);
+                  setNextPackId("");
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" {...form.register("disableAbilities")} />
             Disable Abilities
@@ -85,7 +169,9 @@ export default function Games() {
             <input type="checkbox" {...form.register("disableHeldItems")} />
             Disable Held Items
           </label>
-          <Button type="submit">Create</Button>
+          <Button type="submit" disabled={selectedPackIds.length === 0}>
+            Create
+          </Button>
         </form>
       </Card>
       <Card>
@@ -121,7 +207,6 @@ export default function Games() {
                           data: {
                             name: editName.trim(),
                             notes: editNotes.trim() || null,
-                            packId: game.packId,
                             disableAbilities: editDisableAbilities,
                             disableHeldItems: editDisableHeldItems
                           }
@@ -141,7 +226,7 @@ export default function Games() {
                 <>
                   <div className="font-semibold text-lg">{game.name}</div>
                   <div className="text-xs text-slate-500">
-                    Pack: {packs.find((p) => p.id === game.packId)?.name ?? "Unknown"}
+                    Packs: {game.packNames?.length ? game.packNames.join(" → ") : "None"}
                   </div>
                   {game.notes ? <div className="text-sm text-slate-500">{game.notes}</div> : null}
                   <div className="flex gap-3 text-sm">
