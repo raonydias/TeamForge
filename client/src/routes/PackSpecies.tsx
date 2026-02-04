@@ -31,6 +31,7 @@ function parseStoredTags(raw: string) {
 
 const schema = z.object({
   dexNumber: z.coerce.number().int().min(1),
+  baseSpeciesId: z.coerce.number().int().optional().nullable(),
   name: z.string().min(1),
   type1Id: z.coerce.number().int(),
   type2Id: z.coerce.number().int().optional().nullable(),
@@ -84,6 +85,7 @@ export default function PackSpecies() {
     resolver: zodResolver(schema),
     defaultValues: {
       dexNumber: 1,
+      baseSpeciesId: null,
       name: "",
       type1Id: types[0]?.id ?? 1,
       type2Id: null,
@@ -268,6 +270,10 @@ export default function PackSpecies() {
   const abilityOptions = useMemo(() => abilities.map((a) => ({ id: a.id, name: a.name })), [abilities]);
   const typeColorByName = useMemo(() => new Map(types.map((t) => [t.name, t.color])), [types]);
   const speciesMap = useMemo(() => new Map(species.map((s) => [s.id, s.name])), [species]);
+  const baseSpeciesOptions = useMemo(
+    () => species.filter((s) => !s.baseSpeciesId),
+    [species]
+  );
   const evolutionItems = useMemo(
     () => items.filter((i) => parseStoredTags(i.tags).includes("evolution:item")),
     [items]
@@ -288,6 +294,7 @@ export default function PackSpecies() {
           onSubmit={form.handleSubmit((values) => {
             const payload = {
               ...values,
+              baseSpeciesId: values.baseSpeciesId && values.baseSpeciesId > 0 ? values.baseSpeciesId : null,
               type2Id: values.type2Id && values.type2Id > 0 ? values.type2Id : null
             };
             if (editingSpeciesId) {
@@ -307,6 +314,17 @@ export default function PackSpecies() {
               <div className="text-xs text-slate-500 mb-1">Name</div>
               <Input {...form.register("name")} />
             </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500 mb-1">Form Of (optional)</div>
+            <Select {...form.register("baseSpeciesId")}>
+              <option value="">None (base species)</option>
+              {baseSpeciesOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -399,7 +417,12 @@ export default function PackSpecies() {
                 {species.map((s) => (
                   <tr key={s.id} className="border-t border-slate-100">
                     <td className="py-2">{s.dexNumber}</td>
-                    <td className="py-2 font-medium">{s.name}</td>
+                    <td className="py-2">
+                      <div className="font-medium">{s.name}</div>
+                      {s.baseSpeciesId ? (
+                        <div className="text-xs text-slate-400">Form of {speciesMap.get(s.baseSpeciesId) ?? "Unknown"}</div>
+                      ) : null}
+                    </td>
                     <td>
                       <div className="flex flex-wrap gap-2">
                         {[s.type1Name, s.type2Name]
@@ -423,6 +446,7 @@ export default function PackSpecies() {
                             setEditingSpeciesId(s.id);
                             form.setValue("name", s.name);
                             form.setValue("dexNumber", s.dexNumber);
+                            form.setValue("baseSpeciesId", s.baseSpeciesId ?? null);
                             form.setValue("type1Id", s.type1Id);
                             form.setValue("type2Id", s.type2Id ?? null);
                             form.setValue("hp", s.hp);

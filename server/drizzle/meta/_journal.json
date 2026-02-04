@@ -55,6 +55,12 @@
       "version": "0008",
       "when": 1700000000008,
       "tag": "0008_pack_species_dex_number"
+    },
+    {
+      "idx": 9,
+      "version": "0009",
+      "when": 1700000000009,
+      "tag": "0009_pack_species_base_species_id"
     }
   ]
 }

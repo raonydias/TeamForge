@@ -47,6 +47,7 @@ export const packSpecies = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     packId: integer("pack_id").notNull().references(() => packs.id),
     dexNumber: integer("dex_number").notNull().default(1),
+    baseSpeciesId: integer("base_species_id").references(() => packSpecies.id),
     name: text("name").notNull(),
     type1Id: integer("type1_id").notNull().references(() => packTypes.id),
     type2Id: integer("type2_id").references(() => packTypes.id),

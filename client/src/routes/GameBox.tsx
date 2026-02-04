@@ -148,10 +148,21 @@ export default function GameBox() {
     itemId: "",
     nickname: ""
   });
+  const [speciesQuery, setSpeciesQuery] = useState("");
 
   useEffect(() => {
     if (form.speciesId === 0 && allowedSpeciesList.length > 0) {
       setForm((prev) => ({ ...prev, speciesId: allowedSpeciesList[0].id }));
+    }
+  }, [allowedSpeciesList, form.speciesId]);
+
+  useEffect(() => {
+    const selected = allowedSpeciesList.find((s) => s.id === form.speciesId);
+    if (selected) {
+      setSpeciesQuery(selected.name);
+    } else if (allowedSpeciesList.length > 0) {
+      setForm((prev) => ({ ...prev, speciesId: allowedSpeciesList[0].id }));
+      setSpeciesQuery(allowedSpeciesList[0].name);
     }
   }, [allowedSpeciesList, form.speciesId]);
 
@@ -650,16 +661,33 @@ export default function GameBox() {
               : "md:grid-cols-[1fr]"
           }`}
         >
-          <Select
-            value={form.speciesId}
-            onChange={(e) => setForm((f) => ({ ...f, speciesId: Number(e.target.value) }))}
-          >
-            {allowedSpeciesList.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
+          <div>
+            <Input
+              list={`species-options-${gameId}`}
+              placeholder="Species"
+              value={speciesQuery}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSpeciesQuery(value);
+                const match = allowedSpeciesList.find((s) => s.name.toLowerCase() === value.toLowerCase());
+                setForm((f) => ({ ...f, speciesId: match ? match.id : 0 }));
+              }}
+              onBlur={() => {
+                const selected = allowedSpeciesList.find((s) => s.id === form.speciesId);
+                if (selected) {
+                  setSpeciesQuery(selected.name);
+                } else if (allowedSpeciesList.length > 0) {
+                  setForm((f) => ({ ...f, speciesId: allowedSpeciesList[0].id }));
+                  setSpeciesQuery(allowedSpeciesList[0].name);
+                }
+              }}
+            />
+            <datalist id={`species-options-${gameId}`}>
+              {allowedSpeciesList.map((s) => (
+                <option key={s.id} value={s.name} />
+              ))}
+            </datalist>
+          </div>
           {showAbilities ? (
             <Select
               value={form.abilityId}

@@ -25,6 +25,7 @@ export type PackSpeciesRow = {
   id: number;
   packId: number;
   dexNumber: number;
+  baseSpeciesId: number | null;
   name: string;
   type1Id: number;
   type2Id: number | null;

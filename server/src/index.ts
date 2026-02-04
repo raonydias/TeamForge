@@ -63,6 +63,7 @@ const typeChartSchema = z.object({
 
 const speciesSchema = z.object({
   dexNumber: z.coerce.number().int().min(1),
+  baseSpeciesId: idSchema.optional().nullable(),
   name: z.string().min(1),
   type1Id: idSchema,
   type2Id: idSchema.optional().nullable(),
@@ -449,10 +450,23 @@ app.get("/api/packs/:id/species", async (req, res) => {
 app.post("/api/packs/:id/species", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = speciesSchema.parse(req.body);
+  if (data.baseSpeciesId) {
+    const baseRow = await db
+      .select({ id: packSpecies.id, baseSpeciesId: packSpecies.baseSpeciesId })
+      .from(packSpecies)
+      .where(and(eq(packSpecies.id, data.baseSpeciesId), eq(packSpecies.packId, packId)))
+      .limit(1);
+    if (baseRow.length === 0) {
+      return res.status(400).json({ error: "Base species not found in this pack." });
+    }
+    if (baseRow[0].baseSpeciesId) {
+      return res.status(400).json({ error: "Base species must be a primary species." });
+    }
+  }
   try {
     const [row] = await db
       .insert(packSpecies)
-      .values({ ...data, packId, type2Id: data.type2Id ?? null })
+      .values({ ...data, packId, baseSpeciesId: data.baseSpeciesId ?? null, type2Id: data.type2Id ?? null })
       .returning();
     res.json(row);
   } catch (err: any) {
@@ -468,9 +482,25 @@ app.put("/api/packs/:id/species/:speciesId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const speciesId = idSchema.parse(req.params.speciesId);
   const data = speciesSchema.parse(req.body);
+  if (data.baseSpeciesId) {
+    if (data.baseSpeciesId === speciesId) {
+      return res.status(400).json({ error: "Species cannot reference itself as base." });
+    }
+    const baseRow = await db
+      .select({ id: packSpecies.id, baseSpeciesId: packSpecies.baseSpeciesId })
+      .from(packSpecies)
+      .where(and(eq(packSpecies.id, data.baseSpeciesId), eq(packSpecies.packId, packId)))
+      .limit(1);
+    if (baseRow.length === 0) {
+      return res.status(400).json({ error: "Base species not found in this pack." });
+    }
+    if (baseRow[0].baseSpeciesId) {
+      return res.status(400).json({ error: "Base species must be a primary species." });
+    }
+  }
   const [row] = await db
     .update(packSpecies)
-    .set({ ...data, type2Id: data.type2Id ?? null })
+    .set({ ...data, baseSpeciesId: data.baseSpeciesId ?? null, type2Id: data.type2Id ?? null })
     .where(and(eq(packSpecies.id, speciesId), eq(packSpecies.packId, packId)))
     .returning();
   res.json(row);
@@ -876,6 +906,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
     .select({
       speciesId: packSpecies.id,
       dexNumber: packSpecies.dexNumber,
+      baseSpeciesId: packSpecies.baseSpeciesId,
       name: packSpecies.name,
       type1Id: packSpecies.type1Id,
       type2Id: packSpecies.type2Id,
@@ -917,6 +948,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
     .map((row) => ({
       id: row.speciesId,
       dexNumber: row.dexNumber,
+      baseSpeciesId: row.baseSpeciesId ?? null,
       name: row.name,
       type1Id: row.type1Id,
       type2Id: row.type2Id,
