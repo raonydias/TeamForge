@@ -122,6 +122,17 @@ const teamSchema = z.object({
   )
 });
 
+const teamPreviewSchema = z.object({
+  slots: z
+    .array(
+      z.object({
+        slotIndex: z.number().int().min(1).max(6),
+        boxPokemonId: idSchema.optional().nullable()
+      })
+    )
+    .optional()
+});
+
 async function getPackTypesMap(packId: number) {
   const typesList = await db.select().from(packTypes).where(eq(packTypes.packId, packId));
   const map = new Map(typesList.map((t) => [t.id, t.name]));
@@ -1026,15 +1037,22 @@ async function ensureTeamSlots(gameId: number) {
   await db.insert(teamSlots).values(slots);
 }
 
-app.get("/api/games/:id/team", async (req, res) => {
-  const gameId = idSchema.parse(req.params.id);
+async function buildTeamData(
+  gameId: number,
+  overrides?: { slotIndex: number; boxPokemonId: number | null }[]
+) {
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
-  if (game.length === 0) return res.status(404).json({ error: "Game not found" });
+  if (game.length === 0) return null;
   const packId = game[0].packId;
 
   await ensureTeamSlots(gameId);
 
-  const slots = await db.select().from(teamSlots).where(eq(teamSlots.gameId, gameId)).orderBy(teamSlots.slotIndex);
+  const baseSlots = await db.select().from(teamSlots).where(eq(teamSlots.gameId, gameId)).orderBy(teamSlots.slotIndex);
+  const overrideMap = new Map((overrides ?? []).map((o) => [o.slotIndex, o.boxPokemonId ?? null]));
+  const slots = baseSlots.map((slot) =>
+    overrideMap.has(slot.slotIndex) ? { ...slot, boxPokemonId: overrideMap.get(slot.slotIndex) } : slot
+  );
+
   const selectedIds = slots.map((s) => s.boxPokemonId).filter(Boolean) as number[];
 
   const memberRows = selectedIds.length
@@ -1108,7 +1126,14 @@ app.get("/api/games/:id/team", async (req, res) => {
 
   const members = slots.map((slot) => (slot.boxPokemonId ? membersByBoxId.get(slot.boxPokemonId) ?? null : null));
 
-  res.json({ slots, members, defenseMatrix });
+  return { slots, members, defenseMatrix };
+}
+
+app.get("/api/games/:id/team", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const data = await buildTeamData(gameId);
+  if (!data) return res.status(404).json({ error: "Game not found" });
+  res.json(data);
 });
 
 app.put("/api/games/:id/team", async (req, res) => {
@@ -1124,6 +1149,18 @@ app.put("/api/games/:id/team", async (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+app.post("/api/games/:id/team/preview", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const data = teamPreviewSchema.parse(req.body);
+  const slotsOverride = data.slots?.map((slot) => ({
+    slotIndex: slot.slotIndex,
+    boxPokemonId: slot.boxPokemonId ?? null
+  }));
+  const preview = await buildTeamData(gameId, slotsOverride);
+  if (!preview) return res.status(404).json({ error: "Game not found" });
+  res.json({ defenseMatrix: preview.defenseMatrix });
 });
 
 const port = Number(process.env.PORT) || 4000;

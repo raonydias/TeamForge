@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
 import { api } from "../lib/api";
 import {
@@ -63,6 +63,9 @@ export default function GameBox() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editAbilityId, setEditAbilityId] = useState<string>("");
   const [editItemId, setEditItemId] = useState<string>("");
+  const [addToTeamOpen, setAddToTeamOpen] = useState(false);
+  const [addToTeamSlotIndex, setAddToTeamSlotIndex] = useState<number | "">("");
+  const [addToTeamBox, setAddToTeamBox] = useState<BoxRow | null>(null);
 
   const { data: game } = useQuery<GameRow | null>({
     queryKey: ["games", gameId],
@@ -74,6 +77,14 @@ export default function GameBox() {
   const { data: box = [] } = useQuery<BoxRow[]>({
     queryKey: ["games", gameId, "box"],
     queryFn: () => api.get(`/games/${gameId}/box`)
+  });
+  const { data: team } = useQuery<{
+    slots: { id: number; slotIndex: number; boxPokemonId: number | null }[];
+    members: ({ boxPokemonId: number; nickname: string | null; speciesName: string; type1Id: number; type2Id: number | null; type1Name: string | null; type2Name: string | null } | null)[];
+    defenseMatrix: { attackingTypeId: number; attackingTypeName: string; attackingTypeColor?: string | null; multipliers: (number | null)[]; totalWeak: number; totalResist: number }[];
+  }>({
+    queryKey: ["games", gameId, "team"],
+    queryFn: () => api.get(`/games/${gameId}/team`)
   });
 
   const { data: allowedSpecies = [] } = useQuery<number[]>({
@@ -177,6 +188,16 @@ export default function GameBox() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
   });
 
+  const saveTeam = useMutation({
+    mutationFn: (slots: { slotIndex: number; boxPokemonId: number | null }[]) => api.put(`/games/${gameId}/team`, { slots }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "team"] })
+  });
+
+  const preview = useMutation({
+    mutationFn: (payload: { slotIndex: number; boxPokemonId: number }) =>
+      api.post(`/games/${gameId}/team/preview`, { slots: [payload] })
+  });
+
   const evolutionsBySpecies = useMemo(() => {
     const map = new Map<number, PackSpeciesEvolutionRow[]>();
     evolutions.forEach((evo) => {
@@ -190,6 +211,106 @@ export default function GameBox() {
   const speciesNameById = useMemo(() => new Map(species.map((s) => [s.id, s.name])), [species]);
 
   const typeColorById = useMemo(() => new Map(types.map((t) => [t.id, t.color])), [types]);
+
+  const teamMembers = team?.members ?? [];
+  const teamSlots = team?.slots ?? [];
+  const currentMatrix = team?.defenseMatrix ?? [];
+  const previewMatrix = addToTeamSlotIndex && addToTeamBox ? preview.data?.defenseMatrix ?? [] : currentMatrix;
+
+  function openAddToTeam(row: BoxRow) {
+    const emptySlot = teamSlots.find((s) => !s.boxPokemonId);
+    if (emptySlot) {
+      const nextSlots = teamSlots.map((slot) =>
+        slot.slotIndex === emptySlot.slotIndex ? { ...slot, boxPokemonId: row.id } : slot
+      );
+      saveTeam.mutate(nextSlots.map((s) => ({ slotIndex: s.slotIndex, boxPokemonId: s.boxPokemonId })));
+      return;
+    }
+    setAddToTeamBox(row);
+    setAddToTeamSlotIndex("");
+    setAddToTeamOpen(true);
+  }
+
+  function renderMatrix(
+    matrix: { attackingTypeId: number; attackingTypeName: string; attackingTypeColor?: string | null; multipliers: (number | null)[]; totalWeak: number; totalResist: number }[],
+    members: ({ boxPokemonId: number; nickname: string | null; speciesName: string } | null)[]
+  ) {
+    const totalClass = (value: number, mode: "weak" | "resist") => {
+      if (value <= 0) return "text-slate-500";
+      if (mode === "weak") {
+        if (value === 1) return "bg-rose-50 text-rose-700";
+        if (value === 2) return "bg-rose-100 text-rose-700";
+        return "bg-rose-200 text-rose-900";
+      }
+      if (value === 1) return "bg-emerald-50 text-emerald-700";
+      if (value === 2) return "bg-emerald-100 text-emerald-700";
+      return "bg-emerald-200 text-emerald-900";
+    };
+
+    return (
+      <div className="overflow-auto border border-slate-200 rounded-xl">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-slate-500 border-b border-slate-200">
+              <th className="py-2 px-2">Move</th>
+              {members.map((member, idx) => (
+                <th key={idx} className="py-2 px-2 text-center">
+                  {member ? (
+                    <div className="text-[11px] text-slate-600">{member.nickname || member.speciesName}</div>
+                  ) : (
+                    <div className="text-[11px] text-slate-300">Empty</div>
+                  )}
+                </th>
+              ))}
+              <th className="py-2 px-2 text-center">Weak</th>
+              <th className="py-2 px-2 text-center">Resist</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.filter((row) => row.attackingTypeName !== "???").map((row) => (
+              <tr key={row.attackingTypeId} className="border-t border-slate-100">
+                <td className="py-2 px-2">
+                  <TypePill name={row.attackingTypeName} color={row.attackingTypeColor ?? null} />
+                </td>
+                {row.multipliers.map((mult, idx) => {
+                  const formatted = (() => {
+                    if (mult === null) return { label: "—", className: "text-slate-300" };
+                    const rounded = Math.round(mult * 100) / 100;
+                    if (rounded === 1) return { label: "", className: "" };
+                    if (rounded === 0) return { label: "immune", className: "bg-slate-200 text-slate-700" };
+                    if (rounded === 0.25) return { label: "1/4", className: "bg-emerald-100 text-emerald-700" };
+                    if (rounded === 0.5) return { label: "1/2", className: "bg-emerald-50 text-emerald-700" };
+                    if (rounded === 2) return { label: "2x", className: "bg-rose-50 text-rose-700" };
+                    if (rounded === 4) return { label: "4x", className: "bg-rose-200 text-rose-900 border border-rose-300" };
+                    return { label: `${rounded}x`, className: "bg-slate-100 text-slate-700" };
+                  })();
+                  return (
+                    <td key={idx} className="px-2 py-2 text-center">
+                      {formatted.label ? (
+                        <span className={`inline-flex min-w-[2rem] justify-center rounded-lg px-2 py-1 text-[11px] font-semibold ${formatted.className}`}>
+                          {formatted.label}
+                        </span>
+                      ) : null}
+                    </td>
+                  );
+                })}
+                <td className="px-2 py-2 text-center">
+                  <span className={`inline-flex min-w-[1.75rem] justify-center rounded-md px-2 py-1 text-[11px] font-semibold ${totalClass(row.totalWeak, "weak")}`}>
+                    {row.totalWeak}
+                  </span>
+                </td>
+                <td className="px-2 py-2 text-center">
+                  <span className={`inline-flex min-w-[1.75rem] justify-center rounded-md px-2 py-1 text-[11px] font-semibold ${totalClass(row.totalResist, "resist")}`}>
+                    {row.totalResist}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   const columns: ColumnDef<BoxRow>[] = [
     {
@@ -340,6 +461,9 @@ export default function GameBox() {
               Evolve
             </Button>
           ) : null}
+          <Button onClick={() => openAddToTeam(row.original)} type="button">
+            Add to Team
+          </Button>
           {editingId === row.original.id ? (
             <>
               <Button
@@ -443,19 +567,24 @@ export default function GameBox() {
           <Input placeholder="Notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
         </div>
         <div className="mt-3">
-          <Button
-            onClick={() =>
-              create.mutate({
-                speciesId: Number(form.speciesId),
-                abilityId: form.abilityId ? Number(form.abilityId) : null,
-                itemId: form.itemId ? Number(form.itemId) : null,
-                nickname: form.nickname,
-                notes: form.notes
-              })
-            }
-          >
-            Add to Box
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() =>
+                create.mutate({
+                  speciesId: Number(form.speciesId),
+                  abilityId: form.abilityId ? Number(form.abilityId) : null,
+                  itemId: form.itemId ? Number(form.itemId) : null,
+                  nickname: form.nickname,
+                  notes: form.notes
+                })
+              }
+            >
+              Add to Box
+            </Button>
+            <Link to={`/games/${gameId}/team`} className="inline-flex">
+              <GhostButton type="button">Go to Team</GhostButton>
+            </Link>
+          </div>
         </div>
       </Card>
 
@@ -526,6 +655,89 @@ export default function GameBox() {
           <GhostButton onClick={() => setEvolveOpen(false)} type="button">
             Cancel
           </GhostButton>
+        </div>
+      </Modal>
+      <Modal
+        title="Swap Team Slot"
+        isOpen={addToTeamOpen}
+        onClose={() => setAddToTeamOpen(false)}
+        className="max-w-[1100px] w-[96vw] max-h-[85vh]"
+      >
+        <div className="grid lg:grid-cols-[240px_1fr] gap-4 h-full">
+          <div className="space-y-2">
+            <div className="text-sm text-slate-600">
+              {addToTeamBox ? `Add ${addToTeamBox.nickname || addToTeamBox.speciesName} to team` : "Add to team"}
+            </div>
+            <Select
+              value={addToTeamSlotIndex}
+              onChange={(e) => {
+                const value = e.target.value ? Number(e.target.value) : "";
+                setAddToTeamSlotIndex(value);
+                if (value && addToTeamBox) {
+                  preview.mutate({ slotIndex: value as number, boxPokemonId: addToTeamBox.id });
+                }
+              }}
+            >
+              <option value="">(none)</option>
+              {teamSlots.map((slot) => {
+                const member = teamMembers.find((m) => m?.boxPokemonId === slot.boxPokemonId) ?? null;
+                return (
+                  <option key={slot.slotIndex} value={slot.slotIndex}>
+                    Slot {slot.slotIndex} - {member ? member.nickname || member.speciesName : "Empty"}
+                  </option>
+                );
+              })}
+            </Select>
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  if (!addToTeamBox || !addToTeamSlotIndex) return;
+                  const nextSlots = teamSlots.map((slot) =>
+                    slot.slotIndex === addToTeamSlotIndex ? { ...slot, boxPokemonId: addToTeamBox.id } : slot
+                  );
+                  saveTeam.mutate(nextSlots.map((s) => ({ slotIndex: s.slotIndex, boxPokemonId: s.boxPokemonId })));
+                  setAddToTeamOpen(false);
+                  setAddToTeamBox(null);
+                  setAddToTeamSlotIndex("");
+                }}
+                type="button"
+              >
+                Confirm Swap
+              </Button>
+              <GhostButton
+                onClick={() => {
+                  setAddToTeamOpen(false);
+                  setAddToTeamBox(null);
+                  setAddToTeamSlotIndex("");
+                }}
+                type="button"
+              >
+                Cancel
+              </GhostButton>
+            </div>
+          </div>
+          <div className="max-h-[70vh] overflow-auto">
+            {renderMatrix(
+              previewMatrix,
+              addToTeamSlotIndex && addToTeamBox
+                ? teamSlots.map((slot) => {
+                    if (slot.slotIndex === addToTeamSlotIndex) {
+                      return {
+                        boxPokemonId: addToTeamBox.id,
+                        nickname: addToTeamBox.nickname,
+                        speciesName: addToTeamBox.speciesName,
+                        type1Id: addToTeamBox.type1Id,
+                        type2Id: addToTeamBox.type2Id,
+                        type1Name: addToTeamBox.type1Name ?? null,
+                        type2Name: addToTeamBox.type2Name ?? null
+                      };
+                    }
+                    const member = teamMembers.find((m) => m?.boxPokemonId === slot.boxPokemonId) ?? null;
+                    return member ?? null;
+                  })
+                : teamMembers
+            )}
+          </div>
         </div>
       </Modal>
     </div>

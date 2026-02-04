@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { BoxRow, TeamDefenseRow, TeamMemberSummary, TeamSlot } from "../lib/types";
-import { Button, Card, CardHeader, Select, TypePill } from "../components/ui";
+import { Button, Card, CardHeader, Select, TypePill, GhostButton } from "../components/ui";
 
 function spriteKey(name: string) {
   return name.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -49,6 +49,18 @@ export default function GameTeam() {
 
   const members = data?.members ?? [];
 
+  const totalClass = (value: number, mode: "weak" | "resist") => {
+    if (value <= 0) return "text-slate-500";
+    if (mode === "weak") {
+      if (value === 1) return "bg-rose-50 text-rose-700";
+      if (value === 2) return "bg-rose-100 text-rose-700";
+      return "bg-rose-200 text-rose-900";
+    }
+    if (value === 1) return "bg-emerald-50 text-emerald-700";
+    if (value === 2) return "bg-emerald-100 text-emerald-700";
+    return "bg-emerald-200 text-emerald-900";
+  };
+
   return (
     <div className="grid lg:grid-cols-[320px_1fr] gap-6">
       <Card>
@@ -75,7 +87,12 @@ export default function GameTeam() {
               </Select>
             </div>
           ))}
-          <Button onClick={() => save.mutate()}>Save Team</Button>
+          <div className="flex gap-2">
+            <Button onClick={() => save.mutate()}>Save Team</Button>
+            <Link to={`/games/${gameId}/box`} className="inline-flex">
+              <GhostButton type="button">Go to Box</GhostButton>
+            </Link>
+          </div>
         </div>
       </Card>
 
@@ -119,7 +136,9 @@ export default function GameTeam() {
               </tr>
             </thead>
             <tbody>
-              {(data?.defenseMatrix ?? []).map((row) => (
+              {(data?.defenseMatrix ?? [])
+                .filter((row) => row.attackingTypeName !== "???")
+                .map((row) => (
                 <tr key={row.attackingTypeId} className="border-t border-slate-100">
                   <td className="py-2 pr-4 font-medium text-slate-700">
                     <TypePill name={row.attackingTypeName} color={row.attackingTypeColor ?? null} />
@@ -136,8 +155,16 @@ export default function GameTeam() {
                       </td>
                     );
                   })}
-                  <td className="px-3 py-2 text-center font-semibold text-slate-700">{row.totalWeak}</td>
-                  <td className="px-3 py-2 text-center font-semibold text-emerald-700">{row.totalResist}</td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`inline-flex min-w-[1.75rem] justify-center rounded-md px-2 py-1 text-xs font-semibold ${totalClass(row.totalWeak, "weak")}`}>
+                      {row.totalWeak}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`inline-flex min-w-[1.75rem] justify-center rounded-md px-2 py-1 text-xs font-semibold ${totalClass(row.totalResist, "resist")}`}>
+                      {row.totalResist}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -92,13 +92,14 @@ export function Modal({
   title,
   children,
   isOpen,
-  onClose
-}: PropsWithChildren<{ title: string; isOpen: boolean; onClose: () => void }>) {
+  onClose,
+  className
+}: PropsWithChildren<{ title: string; isOpen: boolean; onClose: () => void; className?: string }>) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 w-[92vw] max-w-xl rounded-2xl bg-white shadow-lg border border-slate-200 p-6">
+      <div className={`relative z-10 w-[92vw] max-w-xl rounded-2xl bg-white shadow-lg border border-slate-200 p-6 ${className ?? ""}`}>
         <div className="text-lg font-semibold font-display text-ink mb-3">{title}</div>
         {children}
       </div>
