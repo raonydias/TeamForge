@@ -5,7 +5,8 @@ export const packs = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
-    description: text("description")
+    description: text("description"),
+    useSingleSpecial: integer("use_single_special").notNull().default(0)
   },
   (t) => ({
     nameIdx: uniqueIndex("packs_name_idx").on(t.name)

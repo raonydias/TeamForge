@@ -10,7 +10,8 @@ import { Button, Card, CardHeader, Input, Modal, GhostButton } from "../componen
 
 const schema = z.object({
   name: z.string().min(1),
-  description: z.string().optional().nullable()
+  description: z.string().optional().nullable(),
+  useSingleSpecial: z.boolean().optional()
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -19,7 +20,10 @@ export default function Packs() {
   const queryClient = useQueryClient();
   const { data: packs = [] } = useQuery<PackRow[]>({ queryKey: ["packs"], queryFn: () => api.get("/packs") });
 
-  const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: { name: "", description: "" } });
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { name: "", description: "", useSingleSpecial: false }
+  });
 
   const create = useMutation({
     mutationFn: (payload: FormValues) => api.post("/packs", payload),
@@ -30,7 +34,7 @@ export default function Packs() {
   });
 
   const update = useMutation({
-    mutationFn: (payload: { id: number; name: string; description: string | null }) =>
+    mutationFn: (payload: { id: number; name: string; description: string | null; useSingleSpecial: boolean }) =>
       api.put(`/packs/${payload.id}`, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs"] })
   });
@@ -43,6 +47,7 @@ export default function Packs() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editSingleSpecial, setEditSingleSpecial] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmBody, setConfirmBody] = useState<string[]>([]);
@@ -55,6 +60,10 @@ export default function Packs() {
         <form className="space-y-3" onSubmit={form.handleSubmit((values) => create.mutate(values))}>
           <Input placeholder="Pack name" {...form.register("name")} />
           <Input placeholder="Description" {...form.register("description")} />
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" {...form.register("useSingleSpecial")} />
+            Gen 1 Special (SpA = SpD)
+          </label>
           <Button type="submit">Create</Button>
         </form>
       </Card>
@@ -67,10 +76,23 @@ export default function Packs() {
                 <>
                   <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
                   <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" />
+                  <label className="flex items-center gap-2 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={editSingleSpecial}
+                      onChange={(e) => setEditSingleSpecial(e.target.checked)}
+                    />
+                    Gen 1 Special (SpA = SpD)
+                  </label>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
-                        update.mutate({ id: pack.id, name: editName.trim(), description: editDesc.trim() || null });
+                        update.mutate({
+                          id: pack.id,
+                          name: editName.trim(),
+                          description: editDesc.trim() || null,
+                          useSingleSpecial: editSingleSpecial
+                        });
                         setEditingId(null);
                       }}
                       type="button"
@@ -95,6 +117,7 @@ export default function Packs() {
                         setEditingId(pack.id);
                         setEditName(pack.name);
                         setEditDesc(pack.description ?? "");
+                        setEditSingleSpecial(pack.useSingleSpecial);
                       }}
                       type="button"
                     >

@@ -8,6 +8,7 @@ import { api } from "../lib/api";
 import {
   PackAbilityRow,
   PackItemRow,
+  PackRow,
   PackSpeciesAbilityRow,
   PackSpeciesEvolutionRow,
   PackSpeciesRow,
@@ -51,6 +52,10 @@ export default function PackSpecies() {
     queryKey: ["packs", packId, "types"],
     queryFn: () => api.get(`/packs/${packId}/types`)
   });
+  const { data: pack } = useQuery<PackRow | null>({
+    queryKey: ["packs", packId],
+    queryFn: () => api.get(`/packs/${packId}`)
+  });
   const { data: abilities = [] } = useQuery<PackAbilityRow[]>({
     queryKey: ["packs", packId, "abilities"],
     queryFn: () => api.get(`/packs/${packId}/abilities`)
@@ -71,6 +76,8 @@ export default function PackSpecies() {
     queryKey: ["packs", packId, "species-evolutions"],
     queryFn: () => api.get(`/packs/${packId}/species-evolutions`)
   });
+
+  const useSingleSpecial = pack?.useSingleSpecial ?? false;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -277,7 +284,10 @@ export default function PackSpecies() {
         <form
           className="space-y-3"
           onSubmit={form.handleSubmit((values) => {
-            const payload = { ...values, type2Id: values.type2Id && values.type2Id > 0 ? values.type2Id : null };
+            const payload = {
+              ...values,
+              type2Id: values.type2Id && values.type2Id > 0 ? values.type2Id : null
+            };
             if (editingSpeciesId) {
               update.mutate({ id: editingSpeciesId, data: payload });
               setEditingSpeciesId(null);
@@ -286,31 +296,62 @@ export default function PackSpecies() {
             }
           })}
         >
-          <Input placeholder="Name" {...form.register("name")} />
+          <div>
+            <div className="text-xs text-slate-500 mb-1">Name</div>
+            <Input {...form.register("name")} />
+          </div>
           <div className="grid grid-cols-2 gap-2">
-            <Select {...form.register("type1Id")}>
-              {types.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
-            <Select {...form.register("type2Id")}>
-              <option value="">None</option>
-              {types.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Type 1</div>
+              <Select {...form.register("type1Id")}>
+                {types.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Type 2</div>
+              <Select {...form.register("type2Id")}>
+                <option value="">None</option>
+                {types.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <Input type="number" placeholder="HP" {...form.register("hp")} />
-            <Input type="number" placeholder="Atk" {...form.register("atk")} />
-            <Input type="number" placeholder="Def" {...form.register("def")} />
-            <Input type="number" placeholder="SpA" {...form.register("spa")} />
-            <Input type="number" placeholder="SpD" {...form.register("spd")} />
-            <Input type="number" placeholder="Spe" {...form.register("spe")} />
+            <div>
+              <div className="text-xs text-slate-500 mb-1">HP</div>
+              <Input type="number" {...form.register("hp")} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Atk</div>
+              <Input type="number" {...form.register("atk")} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Def</div>
+              <Input type="number" {...form.register("def")} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">{useSingleSpecial ? "Special" : "SpA"}</div>
+              <Input type="number" {...form.register("spa")} />
+            </div>
+            {useSingleSpecial ? (
+              <input type="hidden" {...form.register("spd")} />
+            ) : (
+              <div>
+                <div className="text-xs text-slate-500 mb-1">SpD</div>
+                <Input type="number" {...form.register("spd")} />
+              </div>
+            )}
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Spe</div>
+              <Input type="number" {...form.register("spe")} />
+            </div>
           </div>
           <div className="flex gap-2">
             <Button type="submit">{editingSpeciesId ? "Update" : "Save"}</Button>
@@ -339,8 +380,8 @@ export default function PackSpecies() {
                   <th>HP</th>
                   <th>Atk</th>
                   <th>Def</th>
-                  <th>SpA</th>
-                  <th>SpD</th>
+                  <th>{useSingleSpecial ? "Special" : "SpA"}</th>
+                  {useSingleSpecial ? null : <th>SpD</th>}
                   <th>Spe</th>
                   <th></th>
                 </tr>
@@ -363,7 +404,7 @@ export default function PackSpecies() {
                     <td>{s.atk}</td>
                     <td>{s.def}</td>
                     <td>{s.spa}</td>
-                    <td>{s.spd}</td>
+                    {useSingleSpecial ? null : <td>{s.spd}</td>}
                     <td>{s.spe}</td>
                     <td className="text-right">
                       <div className="flex gap-2 justify-end">

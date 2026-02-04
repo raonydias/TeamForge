@@ -2,6 +2,7 @@ export type PackRow = {
   id: number;
   name: string;
   description: string | null;
+  useSingleSpecial: boolean;
 };
 
 export type PackTypeRow = {

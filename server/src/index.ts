@@ -43,7 +43,8 @@ const idSchema = z.coerce.number().int().positive();
 
 const packSchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional().nullable()
+  description: z.string().optional().nullable(),
+  useSingleSpecial: z.boolean().optional().nullable()
 });
 
 const typeSchema = z.object({
@@ -140,6 +141,12 @@ async function getPackTypesMap(packId: number) {
   return { typesList, typeNameById: map };
 }
 
+async function getPackById(packId: number) {
+  const [row] = await db.select().from(packs).where(eq(packs.id, packId)).limit(1);
+  if (!row) return null;
+  return { ...row, useSingleSpecial: !!row.useSingleSpecial };
+}
+
 function applySpeciesOverride(base: any, override: any | null) {
   return {
     ...base,
@@ -157,24 +164,40 @@ function applySpeciesOverride(base: any, override: any | null) {
 // Packs
 app.get("/api/packs", async (_req, res) => {
   const rows = await db.select().from(packs).orderBy(packs.name);
-  res.json(rows);
+  res.json(rows.map((row) => ({ ...row, useSingleSpecial: !!row.useSingleSpecial })));
+});
+
+app.get("/api/packs/:id", async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const pack = await getPackById(id);
+  res.json(pack);
 });
 
 app.post("/api/packs", async (req, res) => {
   const data = packSchema.parse(req.body);
-  const [row] = await db.insert(packs).values({ name: data.name, description: data.description ?? null }).returning();
-  res.json(row);
+  const payload = {
+    name: data.name,
+    description: data.description ?? null,
+    useSingleSpecial: data.useSingleSpecial ? 1 : 0
+  };
+  const [created] = await db.insert(packs).values(payload).returning();
+  res.json({ ...created, useSingleSpecial: !!created.useSingleSpecial });
 });
 
 app.put("/api/packs/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const data = packSchema.parse(req.body);
+  const payload = {
+    name: data.name,
+    description: data.description ?? null,
+    useSingleSpecial: data.useSingleSpecial ? 1 : 0
+  };
   const [row] = await db
     .update(packs)
-    .set({ name: data.name, description: data.description ?? null })
+    .set(payload)
     .where(eq(packs.id, id))
     .returning();
-  res.json(row);
+  res.json({ ...row, useSingleSpecial: !!row.useSingleSpecial });
 });
 
 app.delete("/api/packs/:id", async (req, res) => {
@@ -789,10 +812,13 @@ app.get("/api/games/:id/dex", async (req, res) => {
   const search = typeof req.query.search === "string" ? req.query.search : "";
   const typeId = typeof req.query.typeId === "string" ? Number(req.query.typeId) : null;
   const statMin = (key: string) => (typeof req.query[key] === "string" ? Number(req.query[key]) : null);
+  const minSpecial = statMin("minSpecial");
 
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
   const packId = game[0].packId;
+  const pack = await getPackById(packId);
+  const useSingleSpecial = pack?.useSingleSpecial ?? false;
 
   const { typesList, typeNameById } = await getPackTypesMap(packId);
 
@@ -846,7 +872,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
       atk: row.atk,
       def: row.def,
       spa: row.spa,
-      spd: row.spd,
+      spd: useSingleSpecial ? row.spa : row.spd,
       spe: row.spe,
       type1Name: typeNameById.get(row.type1Id) ?? null,
       type2Name: row.type2Id ? typeNameById.get(row.type2Id) ?? null : null
@@ -856,8 +882,15 @@ app.get("/api/games/:id/dex", async (req, res) => {
     .filter((row) => (statMin("minHp") ? row.hp >= statMin("minHp")! : true))
     .filter((row) => (statMin("minAtk") ? row.atk >= statMin("minAtk")! : true))
     .filter((row) => (statMin("minDef") ? row.def >= statMin("minDef")! : true))
-    .filter((row) => (statMin("minSpa") ? row.spa >= statMin("minSpa")! : true))
-    .filter((row) => (statMin("minSpd") ? row.spd >= statMin("minSpd")! : true))
+    .filter((row) => {
+      if (!useSingleSpecial) {
+        if (statMin("minSpa") && row.spa < statMin("minSpa")!) return false;
+        if (statMin("minSpd") && row.spd < statMin("minSpd")!) return false;
+        return true;
+      }
+      const specialMin = minSpecial ?? statMin("minSpa") ?? statMin("minSpd");
+      return specialMin ? row.spa >= specialMin : true;
+    })
     .filter((row) => (statMin("minSpe") ? row.spe >= statMin("minSpe")! : true));
 
   res.json(normalized);
@@ -868,6 +901,8 @@ app.get("/api/games/:id/box", async (req, res) => {
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
   const packId = game[0].packId;
+  const pack = await getPackById(packId);
+  const useSingleSpecial = pack?.useSingleSpecial ?? false;
 
   const { typeNameById } = await getPackTypesMap(packId);
 
@@ -927,13 +962,14 @@ app.get("/api/games/:id/box", async (req, res) => {
       });
 
       const tags = [...parseTags(row.abilityTags), ...parseTags(row.itemTags)];
+      const effectiveSpd = useSingleSpecial ? effective.spa : effective.spd;
       const potentials = await computePotentials(
         {
           hp: effective.hp,
           atk: effective.atk,
           def: effective.def,
           spa: effective.spa,
-          spd: effective.spd,
+          spd: effectiveSpd,
           spe: effective.spe
         },
         tags
@@ -947,7 +983,7 @@ app.get("/api/games/:id/box", async (req, res) => {
         atk: effective.atk,
         def: effective.def,
         spa: effective.spa,
-        spd: effective.spd,
+        spd: effectiveSpd,
         spe: effective.spe,
         type1Name: typeNameById.get(effective.type1Id) ?? null,
         type2Name: effective.type2Id ? typeNameById.get(effective.type2Id) ?? null : null,

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
 import { api } from "../lib/api";
-import { GameRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
+import { GameRow, PackRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
 import { Card, CardHeader, Input, Select, TypePill } from "../components/ui";
 import { DataTable } from "../components/DataTable";
 
@@ -18,7 +18,8 @@ export default function GameDex() {
     def: "",
     spa: "",
     spd: "",
-    spe: ""
+    spe: "",
+    special: ""
   });
 
   const { data: game } = useQuery<GameRow | null>({
@@ -28,6 +29,14 @@ export default function GameDex() {
 
   const packId = game?.packId ?? 0;
 
+  const { data: pack } = useQuery<PackRow | null>({
+    queryKey: ["packs", packId],
+    queryFn: () => api.get(`/packs/${packId}`),
+    enabled: !!packId
+  });
+
+  const useSingleSpecial = pack?.useSingleSpecial ?? false;
+
   const { data: types = [] } = useQuery<PackTypeRow[]>({
     queryKey: ["packs", packId, "types"],
     queryFn: () => api.get(`/packs/${packId}/types`),
@@ -35,7 +44,7 @@ export default function GameDex() {
   });
 
   const { data: dex = [] } = useQuery<PackSpeciesRow[]>({
-    queryKey: ["games", gameId, "dex", search, typeId, minStats],
+    queryKey: ["games", gameId, "dex", search, typeId, minStats, useSingleSpecial],
     queryFn: () => {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
@@ -43,8 +52,12 @@ export default function GameDex() {
       if (minStats.hp) params.set("minHp", minStats.hp);
       if (minStats.atk) params.set("minAtk", minStats.atk);
       if (minStats.def) params.set("minDef", minStats.def);
-      if (minStats.spa) params.set("minSpa", minStats.spa);
-      if (minStats.spd) params.set("minSpd", minStats.spd);
+      if (useSingleSpecial) {
+        if (minStats.special) params.set("minSpecial", minStats.special);
+      } else {
+        if (minStats.spa) params.set("minSpa", minStats.spa);
+        if (minStats.spd) params.set("minSpd", minStats.spd);
+      }
       if (minStats.spe) params.set("minSpe", minStats.spe);
       const qs = params.toString();
       return api.get(`/games/${gameId}/dex${qs ? `?${qs}` : ""}`);
@@ -77,8 +90,10 @@ export default function GameDex() {
     { id: "hp", header: "HP", accessorKey: "hp" },
     { id: "atk", header: "Atk", accessorKey: "atk" },
     { id: "def", header: "Def", accessorKey: "def" },
-    { id: "spa", header: "SpA", accessorKey: "spa" },
-    { id: "spd", header: "SpD", accessorKey: "spd" },
+    useSingleSpecial
+      ? { id: "special", header: "Special", accessorKey: "spa" }
+      : { id: "spa", header: "SpA", accessorKey: "spa" },
+    ...(useSingleSpecial ? [] : [{ id: "spd", header: "SpD", accessorKey: "spd" }]),
     { id: "spe", header: "Spe", accessorKey: "spe" },
     {
       id: "bst",
@@ -88,7 +103,7 @@ export default function GameDex() {
         row.original.atk +
         row.original.def +
         row.original.spa +
-        row.original.spd +
+        (useSingleSpecial ? 0 : row.original.spd) +
         row.original.spe
     }
   ];
@@ -111,8 +126,18 @@ export default function GameDex() {
         <Input placeholder="Min HP" value={minStats.hp} onChange={(e) => setMinStats((s) => ({ ...s, hp: e.target.value }))} />
         <Input placeholder="Min Atk" value={minStats.atk} onChange={(e) => setMinStats((s) => ({ ...s, atk: e.target.value }))} />
         <Input placeholder="Min Def" value={minStats.def} onChange={(e) => setMinStats((s) => ({ ...s, def: e.target.value }))} />
-        <Input placeholder="Min SpA" value={minStats.spa} onChange={(e) => setMinStats((s) => ({ ...s, spa: e.target.value }))} />
-        <Input placeholder="Min SpD" value={minStats.spd} onChange={(e) => setMinStats((s) => ({ ...s, spd: e.target.value }))} />
+        {useSingleSpecial ? (
+          <Input
+            placeholder="Min Special"
+            value={minStats.special}
+            onChange={(e) => setMinStats((s) => ({ ...s, special: e.target.value }))}
+          />
+        ) : (
+          <>
+            <Input placeholder="Min SpA" value={minStats.spa} onChange={(e) => setMinStats((s) => ({ ...s, spa: e.target.value }))} />
+            <Input placeholder="Min SpD" value={minStats.spd} onChange={(e) => setMinStats((s) => ({ ...s, spd: e.target.value }))} />
+          </>
+        )}
         <Input placeholder="Min Spe" value={minStats.spe} onChange={(e) => setMinStats((s) => ({ ...s, spe: e.target.value }))} />
       </div>
       <div className="overflow-auto">
