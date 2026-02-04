@@ -1126,6 +1126,9 @@ app.delete("/api/packs/:id/species-evolutions/:evoId", async (req, res) => {
 app.post("/api/packs/:id/species-abilities", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = speciesAbilitiesSchema.parse(req.body);
+  if (!Number.isFinite(data.speciesId) || data.speciesId <= 0) {
+    return res.status(400).json({ error: "Invalid speciesId." });
+  }
   const cleanSlots = data.slots
     .filter((slot) => Number.isFinite(slot.abilityId) && slot.abilityId > 0)
     .map((slot) => ({ ...slot, abilityId: Number(slot.abilityId) }));

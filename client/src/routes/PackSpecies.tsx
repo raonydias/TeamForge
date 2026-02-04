@@ -80,6 +80,8 @@ export default function PackSpecies() {
   });
 
   const useSingleSpecial = pack?.useSingleSpecial ?? false;
+  const [type1Query, setType1Query] = useState("");
+  const [type2Query, setType2Query] = useState("");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -104,18 +106,35 @@ export default function PackSpecies() {
     }
   }, [types, form]);
 
+  const type1Id = form.watch("type1Id");
+  const type2Id = form.watch("type2Id");
+
+  useEffect(() => {
+    const type1Name = types.find((t) => t.id === Number(type1Id))?.name ?? "";
+    if (type1Name) setType1Query(type1Name);
+  }, [types, type1Id]);
+
+  useEffect(() => {
+    const type2Name = types.find((t) => t.id === Number(type2Id))?.name ?? "";
+    setType2Query(type2Name);
+  }, [types, type2Id]);
+
   const create = useMutation({
     mutationFn: (payload: FormValues) => api.post(`/packs/${packId}/species`, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] });
       form.reset();
+      setTimeout(() => form.setFocus("name"), 0);
     }
   });
 
   const update = useMutation({
     mutationFn: (payload: { id: number; data: FormValues }) =>
       api.put(`/packs/${packId}/species/${payload.id}`, payload.data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] });
+      setTimeout(() => form.setFocus("name"), 0);
+    }
   });
 
   const remove = useMutation({
@@ -124,6 +143,13 @@ export default function PackSpecies() {
   });
 
   const [editingSpeciesId, setEditingSpeciesId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (editingSpeciesId) return;
+    if (species.length === 0) return;
+    const maxDex = species.reduce((acc, s) => Math.max(acc, s.dexNumber ?? 0), 0);
+    form.setValue("dexNumber", maxDex + 1, { shouldDirty: false });
+  }, [species, editingSpeciesId, form]);
 
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | "">("");
   const [slot1, setSlot1] = useState<string>("");
@@ -214,6 +240,7 @@ export default function PackSpecies() {
   const saveAbilities = useMutation({
     mutationFn: async () => {
       if (!selectedSpeciesId) return;
+      if (!Number.isFinite(Number(selectedSpeciesId))) return;
       const slots = [] as { abilityId: number; slot: "1" | "2" | "H" }[];
       if (slot1) {
         const idValue = Number(slot1);
@@ -329,24 +356,64 @@ export default function PackSpecies() {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <div className="text-xs text-slate-500 mb-1">Type 1</div>
-              <Select {...form.register("type1Id")}>
+              <Input
+                list={`type1-options-${packId}`}
+                placeholder="Type 1"
+                value={type1Query}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setType1Query(value);
+                  const match = types.find((t) => t.name.toLowerCase() === value.toLowerCase());
+                  if (match) form.setValue("type1Id", match.id);
+                }}
+                onBlur={() => {
+                  const selected = types.find((t) => t.id === Number(form.getValues("type1Id")));
+                  if (selected) {
+                    setType1Query(selected.name);
+                  } else if (types.length > 0) {
+                    form.setValue("type1Id", types[0].id);
+                    setType1Query(types[0].name);
+                  }
+                }}
+              />
+              <datalist id={`type1-options-${packId}`}>
                 {types.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
+                  <option key={t.id} value={t.name} />
                 ))}
-              </Select>
+              </datalist>
             </div>
             <div>
               <div className="text-xs text-slate-500 mb-1">Type 2</div>
-              <Select {...form.register("type2Id")}>
-                <option value="">None</option>
+              <Input
+                list={`type2-options-${packId}`}
+                placeholder="Type 2"
+                value={type2Query}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setType2Query(value);
+                  if (!value) {
+                    form.setValue("type2Id", null);
+                    return;
+                  }
+                  const match = types.find((t) => t.name.toLowerCase() === value.toLowerCase());
+                  if (match) form.setValue("type2Id", match.id);
+                }}
+                onBlur={() => {
+                  const selected = types.find((t) => t.id === Number(form.getValues("type2Id")));
+                  if (selected) {
+                    setType2Query(selected.name);
+                  } else {
+                    form.setValue("type2Id", null);
+                    setType2Query("");
+                  }
+                }}
+              />
+              <datalist id={`type2-options-${packId}`}>
+                <option value="None" />
                 {types.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
+                  <option key={t.id} value={t.name} />
                 ))}
-              </Select>
+              </datalist>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -362,22 +429,37 @@ export default function PackSpecies() {
               <div className="text-xs text-slate-500 mb-1">Def</div>
               <Input type="number" {...form.register("def")} />
             </div>
-            <div>
-              <div className="text-xs text-slate-500 mb-1">{useSingleSpecial ? "Special" : "SpA"}</div>
-              <Input type="number" {...form.register("spa")} />
-            </div>
             {useSingleSpecial ? (
-              <input type="hidden" {...form.register("spd")} />
+              <div>
+                <div className="text-xs text-slate-500 mb-1">Spe</div>
+                <Input type="number" {...form.register("spe")} />
+              </div>
+            ) : (
+              <div>
+                <div className="text-xs text-slate-500 mb-1">SpA</div>
+                <Input type="number" {...form.register("spa")} />
+              </div>
+            )}
+            {useSingleSpecial ? (
+              <>
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">Special</div>
+                  <Input type="number" {...form.register("spa")} />
+                </div>
+                <input type="hidden" {...form.register("spd")} />
+              </>
             ) : (
               <div>
                 <div className="text-xs text-slate-500 mb-1">SpD</div>
                 <Input type="number" {...form.register("spd")} />
               </div>
             )}
-            <div>
-              <div className="text-xs text-slate-500 mb-1">Spe</div>
-              <Input type="number" {...form.register("spe")} />
-            </div>
+            {useSingleSpecial ? null : (
+              <div>
+                <div className="text-xs text-slate-500 mb-1">Spe</div>
+                <Input type="number" {...form.register("spe")} />
+              </div>
+            )}
           </div>
           <div className="flex gap-2">
             <Button type="submit">{editingSpeciesId ? "Update" : "Save"}</Button>
@@ -534,7 +616,7 @@ export default function PackSpecies() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button onClick={() => saveAbilities.mutate()} type="button">
+                <Button onClick={() => saveAbilities.mutate()} type="button" disabled={!selectedSpeciesId}>
                   Save Abilities
                 </Button>
                 <GhostButton onClick={() => {

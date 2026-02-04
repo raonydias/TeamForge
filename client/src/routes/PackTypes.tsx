@@ -35,6 +35,12 @@ export default function PackTypes() {
   const [importBusy, setImportBusy] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
+  function normalizeHex(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  }
+
   const createType = useMutation({
     mutationFn: (payload: { name: string; color: string | null; excludeInChart: boolean }) =>
       api.post<PackTypeRow>(`/packs/${packId}/types`, payload),
@@ -134,6 +140,11 @@ export default function PackTypes() {
             className="h-10 w-10 rounded-lg border border-slate-200 bg-white p-1"
             aria-label="Type color"
           />
+          <Input
+            value={color}
+            onChange={(e) => setColor(normalizeHex(e.target.value) || "#")}
+            placeholder="#RRGGBB"
+          />
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input
               type="checkbox"
@@ -191,6 +202,11 @@ export default function PackTypes() {
                       onChange={(e) => setEditColor(e.target.value)}
                       className="h-9 w-9 rounded-lg border border-slate-200 bg-white p-1"
                       aria-label="Type color"
+                    />
+                    <Input
+                      value={editColor}
+                      onChange={(e) => setEditColor(normalizeHex(e.target.value) || "#")}
+                      placeholder="#RRGGBB"
                     />
                     <label className="flex items-center gap-2 text-xs text-slate-600">
                       <input

@@ -175,12 +175,23 @@ export async function seedIfEmpty() {
     const speciesByName = new Map(speciesList.map((s) => [s.name, s.id]));
     const abilityByName = new Map(abilitiesList.map((a) => [a.name, a.id]));
 
-    await db.insert(packSpeciesAbilities).values([
-      { packId: packId!, speciesId: speciesByName.get("Bulbasaur")!, abilityId: abilityByName.get("Overgrow")!, slot: "1" },
-      { packId: packId!, speciesId: speciesByName.get("Charmander")!, abilityId: abilityByName.get("Blaze")!, slot: "1" },
-      { packId: packId!, speciesId: speciesByName.get("Squirtle")!, abilityId: abilityByName.get("Torrent")!, slot: "1" },
-      { packId: packId!, speciesId: speciesByName.get("Pikachu")!, abilityId: abilityByName.get("Static")!, slot: "1" }
-    ]);
+    const rows = [
+      { species: "Bulbasaur", ability: "Overgrow" },
+      { species: "Charmander", ability: "Blaze" },
+      { species: "Squirtle", ability: "Torrent" },
+      { species: "Pikachu", ability: "Static" }
+    ]
+      .map((entry) => {
+        const speciesId = speciesByName.get(entry.species);
+        const abilityId = abilityByName.get(entry.ability);
+        if (!speciesId || !abilityId) return null;
+        return { packId: packId!, speciesId, abilityId, slot: "1" as const };
+      })
+      .filter(Boolean) as { packId: number; speciesId: number; abilityId: number; slot: "1" }[];
+
+    if (rows.length > 0) {
+      await db.insert(packSpeciesAbilities).values(rows);
+    }
   }
 
   const existingSettings = await db.select().from(settings).limit(1);
