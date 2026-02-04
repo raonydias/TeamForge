@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -49,6 +49,9 @@ export default function PackSpecies() {
   const { id } = useParams();
   const packId = Number(id);
   const queryClient = useQueryClient();
+  const [importBusy, setImportBusy] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const evolutionSpeciesInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: types = [] } = useQuery<PackTypeRow[]>({
     queryKey: ["packs", packId, "types"],
@@ -142,6 +145,31 @@ export default function PackSpecies() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] })
   });
 
+  async function exportSpecies() {
+    const payload = await api.get(`/packs/${packId}/species/export`);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `pack-${packId}-species.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImport(file: File) {
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      await api.post(`/packs/${packId}/species/import`, json);
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] });
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-abilities"] });
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   const [editingSpeciesId, setEditingSpeciesId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -152,12 +180,15 @@ export default function PackSpecies() {
   }, [species, editingSpeciesId, form]);
 
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | "">("");
+  const [selectedSpeciesQuery, setSelectedSpeciesQuery] = useState("");
   const [slot1, setSlot1] = useState<string>("");
   const [slot2, setSlot2] = useState<string>("");
   const [hiddenSlots, setHiddenSlots] = useState<number[]>([]);
 
   const [selectedEvolutionSpeciesId, setSelectedEvolutionSpeciesId] = useState<number | "">("");
+  const [selectedEvolutionSpeciesQuery, setSelectedEvolutionSpeciesQuery] = useState("");
   const [evolutionTargetId, setEvolutionTargetId] = useState<number | "">("");
+  const [evolutionTargetQuery, setEvolutionTargetQuery] = useState("");
   const [evolutionType, setEvolutionType] = useState<"Level" | "Item" | "Stone" | "Trade" | "Friendship" | "Custom">(
     "Level"
   );
@@ -176,8 +207,18 @@ export default function PackSpecies() {
   }, [selectedSpeciesId, speciesAbilities]);
 
   useEffect(() => {
+    if (!selectedSpeciesId) {
+      setSelectedSpeciesQuery("");
+      return;
+    }
+    const selected = species.find((s) => s.id === Number(selectedSpeciesId));
+    if (selected) setSelectedSpeciesQuery(selected.name);
+  }, [selectedSpeciesId, species]);
+
+  useEffect(() => {
     if (!selectedEvolutionSpeciesId) return;
     setEvolutionTargetId("");
+    setEvolutionTargetQuery("");
     setEvolutionType("Level");
     setEvolutionLevel("");
     setEvolutionItemId("");
@@ -185,6 +226,24 @@ export default function PackSpecies() {
     setEvolutionCustom("");
     setEditingEvolutionId(null);
   }, [selectedEvolutionSpeciesId]);
+
+  useEffect(() => {
+    if (!selectedEvolutionSpeciesId) {
+      setSelectedEvolutionSpeciesQuery("");
+      return;
+    }
+    const selected = species.find((s) => s.id === Number(selectedEvolutionSpeciesId));
+    if (selected) setSelectedEvolutionSpeciesQuery(selected.name);
+  }, [selectedEvolutionSpeciesId, species]);
+
+  useEffect(() => {
+    if (!evolutionTargetId) {
+      setEvolutionTargetQuery("");
+      return;
+    }
+    const selected = species.find((s) => s.id === Number(evolutionTargetId));
+    if (selected) setEvolutionTargetQuery(selected.name);
+  }, [evolutionTargetId, species]);
 
   function buildMethod(): string | null {
     if (evolutionType === "Level") {
@@ -272,7 +331,9 @@ export default function PackSpecies() {
         method
       });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] });
+    }
   });
 
   const updateEvolution = useMutation({
@@ -286,7 +347,9 @@ export default function PackSpecies() {
         method
       });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] });
+    }
   });
 
   const removeEvolution = useMutation({
@@ -311,6 +374,23 @@ export default function PackSpecies() {
   );
 
   const evolutionsForSelected = evolutions.filter((e) => e.fromSpeciesId === Number(selectedEvolutionSpeciesId));
+  const focusEvolutionSpecies = () => {
+    evolutionSpeciesInputRef.current?.focus();
+  };
+
+  const submitEvolution = () => {
+    if (editingEvolutionId) {
+      updateEvolution.mutate();
+      setEditingEvolutionId(null);
+    } else {
+      createEvolution.mutate();
+    }
+    setSelectedEvolutionSpeciesId("");
+    setSelectedEvolutionSpeciesQuery("");
+    setEvolutionTargetId("");
+    setEvolutionTargetQuery("");
+    focusEvolutionSpecies();
+  };
 
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
@@ -475,6 +555,30 @@ export default function PackSpecies() {
             ) : null}
           </div>
         </form>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button type="button" onClick={exportSpecies}>
+            Export Species
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              void handleImport(file);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            disabled={importBusy}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {importBusy ? "Importing..." : "Import Species"}
+          </Button>
+        </div>
       </Card>
       <div className="space-y-6">
         <Card>
@@ -557,20 +661,33 @@ export default function PackSpecies() {
         <Card>
           <CardHeader title="Species Abilities" subtitle="Assign Ability 1/2 and multiple Hidden abilities." />
           <div className="grid md:grid-cols-[240px_1fr] gap-4">
-            <Select
-              value={selectedSpeciesId}
-              onChange={(e) => {
-                const value = e.target.value;
-                setSelectedSpeciesId(value ? Number(value) : "");
-              }}
-            >
-              <option value="">Select species</option>
-              {species.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
+            <div>
+              <Input
+                list={`species-abilities-options-${packId}`}
+                placeholder="Select species"
+                value={selectedSpeciesQuery}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSelectedSpeciesQuery(value);
+                  const match = species.find((s) => s.name.toLowerCase() === value.toLowerCase());
+                  setSelectedSpeciesId(match ? match.id : "");
+                }}
+                onBlur={() => {
+                  const selected = species.find((s) => s.id === Number(selectedSpeciesId));
+                  if (selected) {
+                    setSelectedSpeciesQuery(selected.name);
+                  } else {
+                    setSelectedSpeciesId("");
+                    setSelectedSpeciesQuery("");
+                  }
+                }}
+              />
+              <datalist id={`species-abilities-options-${packId}`}>
+                {species.map((s) => (
+                  <option key={s.id} value={s.name} />
+                ))}
+              </datalist>
+            </div>
             <div className="space-y-3">
               <div className="grid md:grid-cols-2 gap-3">
                 <div>
@@ -632,37 +749,67 @@ export default function PackSpecies() {
         <Card>
           <CardHeader title="Species Evolutions" subtitle="Define evolutions and methods for a species." />
           <div className="grid md:grid-cols-[240px_1fr] gap-4">
-            <Select
-              value={selectedEvolutionSpeciesId}
-              onChange={(e) => {
-                const value = e.target.value;
-                setSelectedEvolutionSpeciesId(value ? Number(value) : "");
-              }}
-            >
-              <option value="">Select species</option>
-              {species.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
+            <div>
+              <Input
+                ref={evolutionSpeciesInputRef}
+                list={`species-evolutions-options-${packId}`}
+                placeholder="Select species"
+                value={selectedEvolutionSpeciesQuery}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSelectedEvolutionSpeciesQuery(value);
+                  const match = species.find((s) => s.name.toLowerCase() === value.toLowerCase());
+                  setSelectedEvolutionSpeciesId(match ? match.id : "");
+                }}
+                onBlur={() => {
+                  const selected = species.find((s) => s.id === Number(selectedEvolutionSpeciesId));
+                  if (selected) {
+                    setSelectedEvolutionSpeciesQuery(selected.name);
+                  } else {
+                    setSelectedEvolutionSpeciesId("");
+                    setSelectedEvolutionSpeciesQuery("");
+                  }
+                }}
+              />
+              <datalist id={`species-evolutions-options-${packId}`}>
+                {species.map((s) => (
+                  <option key={s.id} value={s.name} />
+                ))}
+              </datalist>
+            </div>
             <div className="space-y-3">
               <div className="grid md:grid-cols-2 gap-3">
                 <div>
                   <div className="text-xs text-slate-500 mb-1">Evolves To</div>
-                  <Select
-                    value={evolutionTargetId}
-                    onChange={(e) => setEvolutionTargetId(e.target.value ? Number(e.target.value) : "")}
-                  >
-                    <option value="">Select target</option>
-                    {species
-                      .filter((s) => s.id !== Number(selectedEvolutionSpeciesId))
-                      .map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                  </Select>
+                  <div>
+                    <Input
+                      list={`evolution-target-options-${packId}`}
+                      placeholder="Select target"
+                      value={evolutionTargetQuery}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setEvolutionTargetQuery(value);
+                        const match = species.find((s) => s.name.toLowerCase() === value.toLowerCase());
+                        setEvolutionTargetId(match ? match.id : "");
+                      }}
+                      onBlur={() => {
+                        const selected = species.find((s) => s.id === Number(evolutionTargetId));
+                        if (selected) {
+                          setEvolutionTargetQuery(selected.name);
+                        } else {
+                          setEvolutionTargetId("");
+                          setEvolutionTargetQuery("");
+                        }
+                      }}
+                    />
+                    <datalist id={`evolution-target-options-${packId}`}>
+                      {species
+                        .filter((s) => s.id !== Number(selectedEvolutionSpeciesId))
+                        .map((s) => (
+                          <option key={s.id} value={s.name} />
+                        ))}
+                    </datalist>
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-500 mb-1">Method Preset</div>
@@ -678,13 +825,27 @@ export default function PackSpecies() {
               </div>
 
               {evolutionType === "Level" ? (
-                <Input placeholder="Level (e.g. 16)" value={evolutionLevel} onChange={(e) => setEvolutionLevel(e.target.value)} />
+                <Input
+                  placeholder="Level (e.g. 16)"
+                  value={evolutionLevel}
+                  onChange={(e) => setEvolutionLevel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    submitEvolution();
+                  }}
+                />
               ) : null}
 
               {evolutionType === "Item" || evolutionType === "Stone" || evolutionType === "Trade" ? (
                 <Select
                   value={evolutionItemId}
                   onChange={(e) => setEvolutionItemId(e.target.value ? Number(e.target.value) : "")}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    submitEvolution();
+                  }}
                 >
                   <option value="">No Item</option>
                   {(evolutionType === "Stone" ? evolutionStones : evolutionType === "Item" ? evolutionItems : items).map(
@@ -701,6 +862,11 @@ export default function PackSpecies() {
                 <Select
                   value={evolutionFriendshipTime}
                   onChange={(e) => setEvolutionFriendshipTime(e.target.value as "" | "Day" | "Night")}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    submitEvolution();
+                  }}
                 >
                   <option value="">Any Time</option>
                   <option value="Day">Day</option>
@@ -709,21 +875,20 @@ export default function PackSpecies() {
               ) : null}
 
               {evolutionType === "Custom" ? (
-                <Input placeholder="Custom method" value={evolutionCustom} onChange={(e) => setEvolutionCustom(e.target.value)} />
+                <Input
+                  placeholder="Custom method"
+                  value={evolutionCustom}
+                  onChange={(e) => setEvolutionCustom(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    submitEvolution();
+                  }}
+                />
               ) : null}
 
               <div className="flex gap-2">
-                <Button
-                  onClick={() => {
-                    if (editingEvolutionId) {
-                      updateEvolution.mutate();
-                      setEditingEvolutionId(null);
-                    } else {
-                      createEvolution.mutate();
-                    }
-                  }}
-                  type="button"
-                >
+                <Button onClick={submitEvolution} type="button">
                   {editingEvolutionId ? "Update Evolution" : "Add Evolution"}
                 </Button>
                 <GhostButton

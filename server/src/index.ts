@@ -120,6 +120,45 @@ const speciesEvolutionSchema = z.object({
   method: z.string().min(1)
 });
 
+const speciesImportSchema = z.object({
+  mode: z.enum(["replace", "merge"]).optional().default("replace"),
+  species: z.array(
+    z.object({
+      dexNumber: z.coerce.number().int().min(1),
+      name: z.string().min(1),
+      baseSpeciesName: z.string().optional().nullable(),
+      type1Name: z.string().min(1),
+      type2Name: z.string().optional().nullable(),
+      hp: z.number().int().min(1),
+      atk: z.number().int().min(1),
+      def: z.number().int().min(1),
+      spa: z.number().int().min(1),
+      spd: z.number().int().min(1),
+      spe: z.number().int().min(1)
+    })
+  ),
+  abilities: z
+    .array(
+      z.object({
+        speciesName: z.string().min(1),
+        abilityName: z.string().min(1),
+        slot: z.enum(["1", "2", "H"])
+      })
+    )
+    .optional()
+    .default([]),
+  evolutions: z
+    .array(
+      z.object({
+        fromSpeciesName: z.string().min(1),
+        toSpeciesName: z.string().min(1),
+        method: z.string().min(1)
+      })
+    )
+    .optional()
+    .default([])
+});
+
 const gameCreateSchema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
@@ -881,6 +920,217 @@ app.post("/api/packs/:id/typechart", async (req, res) => {
       set: { multiplier: data.multiplier }
     });
   res.json({ ok: true });
+});
+
+app.get("/api/packs/:id/species/export", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const typesList = await db.select().from(packTypes).where(eq(packTypes.packId, packId));
+  const typeNameById = new Map(typesList.map((t) => [t.id, t.name]));
+  const speciesRows = await db
+    .select()
+    .from(packSpecies)
+    .where(eq(packSpecies.packId, packId))
+    .orderBy(packSpecies.dexNumber, packSpecies.name);
+  const speciesNameById = new Map(speciesRows.map((s) => [s.id, s.name]));
+  const abilityRows = await db.select().from(packAbilities).where(eq(packAbilities.packId, packId));
+  const abilityNameById = new Map(abilityRows.map((a) => [a.id, a.name]));
+  const speciesAbilityRows = await db
+    .select()
+    .from(packSpeciesAbilities)
+    .where(eq(packSpeciesAbilities.packId, packId));
+  const evoRows = await db
+    .select()
+    .from(packSpeciesEvolutions)
+    .where(eq(packSpeciesEvolutions.packId, packId));
+
+  res.json({
+    species: speciesRows.map((s) => ({
+      dexNumber: s.dexNumber,
+      name: s.name,
+      baseSpeciesName: s.baseSpeciesId ? speciesNameById.get(s.baseSpeciesId) ?? null : null,
+      type1Name: typeNameById.get(s.type1Id) ?? "",
+      type2Name: s.type2Id ? typeNameById.get(s.type2Id) ?? null : null,
+      hp: s.hp,
+      atk: s.atk,
+      def: s.def,
+      spa: s.spa,
+      spd: s.spd,
+      spe: s.spe
+    })),
+    abilities: speciesAbilityRows
+      .map((row) => ({
+        speciesName: speciesNameById.get(row.speciesId) ?? "",
+        abilityName: abilityNameById.get(row.abilityId) ?? "",
+        slot: row.slot
+      }))
+      .filter((row) => row.speciesName && row.abilityName),
+    evolutions: evoRows
+      .map((row) => ({
+        fromSpeciesName: speciesNameById.get(row.fromSpeciesId) ?? "",
+        toSpeciesName: speciesNameById.get(row.toSpeciesId) ?? "",
+        method: row.method
+      }))
+      .filter((row) => row.fromSpeciesName && row.toSpeciesName)
+  });
+});
+
+app.post("/api/packs/:id/species/import", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const data = speciesImportSchema.parse(req.body);
+  const mode = data.mode ?? "replace";
+
+  const typesList = await db.select().from(packTypes).where(eq(packTypes.packId, packId));
+  const typeIdByName = new Map(typesList.map((t) => [normalizeKey(t.name), t.id]));
+  const abilityRows = await db.select().from(packAbilities).where(eq(packAbilities.packId, packId));
+  const abilityIdByName = new Map(abilityRows.map((a) => [normalizeKey(a.name), a.id]));
+
+  const missingTypes = new Set<string>();
+  data.species.forEach((s) => {
+    if (!typeIdByName.has(normalizeKey(s.type1Name))) missingTypes.add(s.type1Name);
+    if (s.type2Name && !typeIdByName.has(normalizeKey(s.type2Name))) missingTypes.add(s.type2Name);
+  });
+
+  const missingAbilities = new Set<string>();
+  data.abilities.forEach((row) => {
+    if (!abilityIdByName.has(normalizeKey(row.abilityName))) missingAbilities.add(row.abilityName);
+  });
+
+  if (missingTypes.size > 0) {
+    return res.status(400).json({ error: "Missing types", missingTypes: Array.from(missingTypes) });
+  }
+  if (missingAbilities.size > 0) {
+    return res.status(400).json({ error: "Missing abilities", missingAbilities: Array.from(missingAbilities) });
+  }
+
+  db.transaction((tx) => {
+    if (mode === "replace") {
+      tx.delete(packSpeciesAbilities).where(eq(packSpeciesAbilities.packId, packId)).run();
+      tx.delete(packSpeciesEvolutions).where(eq(packSpeciesEvolutions.packId, packId)).run();
+      tx.delete(packSpecies).where(eq(packSpecies.packId, packId)).run();
+    }
+
+    const existingSpecies = tx.select().from(packSpecies).where(eq(packSpecies.packId, packId)).all();
+    const existingByName = new Map(existingSpecies.map((s) => [normalizeKey(s.name), s]));
+    const speciesIdByName = new Map<string, number>();
+    const baseLinks: { speciesKey: string; baseKey: string }[] = [];
+
+    for (const row of data.species) {
+      const key = normalizeKey(row.name);
+      const type1Id = typeIdByName.get(normalizeKey(row.type1Name))!;
+      const type2Id = row.type2Name ? typeIdByName.get(normalizeKey(row.type2Name)) ?? null : null;
+      const existing = existingByName.get(key);
+      if (existing) {
+        tx.update(packSpecies)
+          .set({
+            dexNumber: row.dexNumber,
+            name: row.name,
+            type1Id,
+            type2Id,
+            hp: row.hp,
+            atk: row.atk,
+            def: row.def,
+            spa: row.spa,
+            spd: row.spd,
+            spe: row.spe,
+            baseSpeciesId: null
+          })
+          .where(eq(packSpecies.id, existing.id))
+          .run();
+        speciesIdByName.set(key, existing.id);
+      } else {
+        const inserted = tx
+          .insert(packSpecies)
+          .values({
+            packId,
+            dexNumber: row.dexNumber,
+            baseSpeciesId: null,
+            name: row.name,
+            type1Id,
+            type2Id,
+            hp: row.hp,
+            atk: row.atk,
+            def: row.def,
+            spa: row.spa,
+            spd: row.spd,
+            spe: row.spe
+          })
+          .returning()
+          .get();
+        speciesIdByName.set(key, inserted.id);
+      }
+      if (row.baseSpeciesName) {
+        baseLinks.push({ speciesKey: key, baseKey: normalizeKey(row.baseSpeciesName) });
+      }
+    }
+
+    for (const link of baseLinks) {
+      const speciesId = speciesIdByName.get(link.speciesKey);
+      const baseId = speciesIdByName.get(link.baseKey);
+      if (!speciesId || !baseId) continue;
+      tx.update(packSpecies).set({ baseSpeciesId: baseId }).where(eq(packSpecies.id, speciesId)).run();
+    }
+
+    if (mode === "merge") {
+      const affectedSpeciesIds = Array.from(
+        new Set(
+          data.abilities
+            .map((row) => speciesIdByName.get(normalizeKey(row.speciesName)))
+            .filter(Boolean) as number[]
+        )
+      );
+      if (affectedSpeciesIds.length > 0) {
+        tx.delete(packSpeciesAbilities)
+          .where(and(eq(packSpeciesAbilities.packId, packId), inArray(packSpeciesAbilities.speciesId, affectedSpeciesIds)))
+          .run();
+      }
+
+      const affectedEvoIds = Array.from(
+        new Set(
+          data.evolutions
+            .map((row) => speciesIdByName.get(normalizeKey(row.fromSpeciesName)))
+            .filter(Boolean) as number[]
+        )
+      );
+      if (affectedEvoIds.length > 0) {
+        tx.delete(packSpeciesEvolutions)
+          .where(and(eq(packSpeciesEvolutions.packId, packId), inArray(packSpeciesEvolutions.fromSpeciesId, affectedEvoIds)))
+          .run();
+      }
+    } else {
+      tx.delete(packSpeciesAbilities).where(eq(packSpeciesAbilities.packId, packId)).run();
+      tx.delete(packSpeciesEvolutions).where(eq(packSpeciesEvolutions.packId, packId)).run();
+    }
+
+    for (const row of data.abilities) {
+      const speciesId = speciesIdByName.get(normalizeKey(row.speciesName));
+      const abilityId = abilityIdByName.get(normalizeKey(row.abilityName));
+      if (!speciesId || !abilityId) continue;
+      tx.insert(packSpeciesAbilities)
+        .values({
+          packId,
+          speciesId,
+          abilityId,
+          slot: row.slot
+        })
+        .run();
+    }
+
+    for (const row of data.evolutions) {
+      const fromId = speciesIdByName.get(normalizeKey(row.fromSpeciesName));
+      const toId = speciesIdByName.get(normalizeKey(row.toSpeciesName));
+      if (!fromId || !toId) continue;
+      tx.insert(packSpeciesEvolutions)
+        .values({
+          packId,
+          fromSpeciesId: fromId,
+          toSpeciesId: toId,
+          method: row.method
+        })
+        .run();
+    }
+  });
+
+  res.json({ ok: true, mode, species: data.species.length, abilities: data.abilities.length, evolutions: data.evolutions.length });
 });
 
 // Pack Species
