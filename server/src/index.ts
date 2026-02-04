@@ -62,6 +62,7 @@ const typeChartSchema = z.object({
 });
 
 const speciesSchema = z.object({
+  dexNumber: z.coerce.number().int().min(1),
   name: z.string().min(1),
   type1Id: idSchema,
   type2Id: idSchema.optional().nullable(),
@@ -430,7 +431,11 @@ app.get("/api/packs/:id/species", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const { typesList, typeNameById } = await getPackTypesMap(packId);
 
-  const rows = await db.select().from(packSpecies).where(eq(packSpecies.packId, packId)).orderBy(packSpecies.name);
+  const rows = await db
+    .select()
+    .from(packSpecies)
+    .where(eq(packSpecies.packId, packId))
+    .orderBy(packSpecies.dexNumber, packSpecies.name);
 
   const withNames = rows.map((row) => ({
     ...row,
@@ -857,6 +862,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
   const typeId = typeof req.query.typeId === "string" ? Number(req.query.typeId) : null;
   const statMin = (key: string) => (typeof req.query[key] === "string" ? Number(req.query[key]) : null);
   const minSpecial = statMin("minSpecial");
+  const minBst = statMin("minBst");
 
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
@@ -869,6 +875,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
   const rows = await db
     .select({
       speciesId: packSpecies.id,
+      dexNumber: packSpecies.dexNumber,
       name: packSpecies.name,
       type1Id: packSpecies.type1Id,
       type2Id: packSpecies.type2Id,
@@ -894,7 +901,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
       and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
     )
     .where(eq(gameSpecies.gameId, gameId))
-    .orderBy(packSpecies.name);
+    .orderBy(packSpecies.dexNumber, packSpecies.name);
 
   const normalized = rows
     .map((row) => applySpeciesOverride(row, {
@@ -909,6 +916,7 @@ app.get("/api/games/:id/dex", async (req, res) => {
     }))
     .map((row) => ({
       id: row.speciesId,
+      dexNumber: row.dexNumber,
       name: row.name,
       type1Id: row.type1Id,
       type2Id: row.type2Id,
@@ -935,7 +943,12 @@ app.get("/api/games/:id/dex", async (req, res) => {
       const specialMin = minSpecial ?? statMin("minSpa") ?? statMin("minSpd");
       return specialMin ? row.spa >= specialMin : true;
     })
-    .filter((row) => (statMin("minSpe") ? row.spe >= statMin("minSpe")! : true));
+    .filter((row) => (statMin("minSpe") ? row.spe >= statMin("minSpe")! : true))
+    .filter((row) => {
+      if (!minBst) return true;
+      const bst = row.hp + row.atk + row.def + row.spa + (useSingleSpecial ? 0 : row.spd) + row.spe;
+      return bst >= minBst;
+    });
 
   res.json(normalized);
 });

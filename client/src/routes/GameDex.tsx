@@ -19,7 +19,8 @@ export default function GameDex() {
     spa: "",
     spd: "",
     spe: "",
-    special: ""
+    special: "",
+    bst: ""
   });
 
   const { data: game } = useQuery<GameRow | null>({
@@ -59,6 +60,7 @@ export default function GameDex() {
         if (minStats.spd) params.set("minSpd", minStats.spd);
       }
       if (minStats.spe) params.set("minSpe", minStats.spe);
+      if (minStats.bst) params.set("minBst", minStats.bst);
       const qs = params.toString();
       return api.get(`/games/${gameId}/dex${qs ? `?${qs}` : ""}`);
     }
@@ -67,6 +69,7 @@ export default function GameDex() {
   const typeColorByName = useMemo(() => new Map(types.map((t) => [t.name, t.color])), [types]);
 
   const columns: ColumnDef<PackSpeciesRow>[] = [
+    { id: "dexNumber", header: "Dex #", accessorKey: "dexNumber" },
     {
       id: "name",
       header: "Name",
@@ -98,6 +101,13 @@ export default function GameDex() {
     {
       id: "bst",
       header: "BST",
+      accessorFn: (row) =>
+        row.hp +
+        row.atk +
+        row.def +
+        row.spa +
+        (useSingleSpecial ? 0 : row.spd) +
+        row.spe,
       cell: ({ row }) =>
         row.original.hp +
         row.original.atk +
@@ -139,6 +149,7 @@ export default function GameDex() {
           </>
         )}
         <Input placeholder="Min Spe" value={minStats.spe} onChange={(e) => setMinStats((s) => ({ ...s, spe: e.target.value }))} />
+        <Input placeholder="Min BST" value={minStats.bst} onChange={(e) => setMinStats((s) => ({ ...s, bst: e.target.value }))} />
       </div>
       <div className="overflow-auto">
         <DataTable data={dex} columns={columns} />

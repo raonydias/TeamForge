@@ -110,6 +110,7 @@ export async function seedIfEmpty() {
     await db.insert(packSpecies).values([
       {
         packId: packId!,
+        dexNumber: 1,
         name: "Bulbasaur",
         type1Id: byName.get("Grass")!,
         type2Id: null,
@@ -122,6 +123,7 @@ export async function seedIfEmpty() {
       },
       {
         packId: packId!,
+        dexNumber: 4,
         name: "Charmander",
         type1Id: byName.get("Fire")!,
         type2Id: null,
@@ -134,6 +136,7 @@ export async function seedIfEmpty() {
       },
       {
         packId: packId!,
+        dexNumber: 7,
         name: "Squirtle",
         type1Id: byName.get("Water")!,
         type2Id: null,
@@ -146,6 +149,7 @@ export async function seedIfEmpty() {
       },
       {
         packId: packId!,
+        dexNumber: 25,
         name: "Pikachu",
         type1Id: byName.get("Electric")!,
         type2Id: null,

@@ -30,6 +30,7 @@ function parseStoredTags(raw: string) {
 }
 
 const schema = z.object({
+  dexNumber: z.coerce.number().int().min(1),
   name: z.string().min(1),
   type1Id: z.coerce.number().int(),
   type2Id: z.coerce.number().int().optional().nullable(),
@@ -82,6 +83,7 @@ export default function PackSpecies() {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
+      dexNumber: 1,
       name: "",
       type1Id: types[0]?.id ?? 1,
       type2Id: null,
@@ -296,9 +298,15 @@ export default function PackSpecies() {
             }
           })}
         >
-          <div>
-            <div className="text-xs text-slate-500 mb-1">Name</div>
-            <Input {...form.register("name")} />
+          <div className="grid grid-cols-[120px_1fr] gap-2">
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Dex #</div>
+              <Input type="number" min={1} {...form.register("dexNumber")} />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Name</div>
+              <Input {...form.register("name")} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -375,6 +383,7 @@ export default function PackSpecies() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-500">
+                  <th>Dex #</th>
                   <th>Name</th>
                   <th>Types</th>
                   <th>HP</th>
@@ -389,6 +398,7 @@ export default function PackSpecies() {
               <tbody>
                 {species.map((s) => (
                   <tr key={s.id} className="border-t border-slate-100">
+                    <td className="py-2">{s.dexNumber}</td>
                     <td className="py-2 font-medium">{s.name}</td>
                     <td>
                       <div className="flex flex-wrap gap-2">
@@ -412,6 +422,7 @@ export default function PackSpecies() {
                           onClick={() => {
                             setEditingSpeciesId(s.id);
                             form.setValue("name", s.name);
+                            form.setValue("dexNumber", s.dexNumber);
                             form.setValue("type1Id", s.type1Id);
                             form.setValue("type2Id", s.type2Id ?? null);
                             form.setValue("hp", s.hp);
