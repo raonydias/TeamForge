@@ -88,6 +88,24 @@ export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttrib
 );
 Select.displayName = "Select";
 
+export function Modal({
+  title,
+  children,
+  isOpen,
+  onClose
+}: PropsWithChildren<{ title: string; isOpen: boolean; onClose: () => void }>) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative z-10 w-[92vw] max-w-xl rounded-2xl bg-white shadow-lg border border-slate-200 p-6">
+        <div className="text-lg font-semibold font-display text-ink mb-3">{title}</div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function Badge({ children }: PropsWithChildren) {
   return <span className="inline-flex items-center px-2 py-1 rounded-full bg-slate-100 text-xs text-slate-600">{children}</span>;
 }

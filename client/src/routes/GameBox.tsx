@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
 import { api } from "../lib/api";
 import { BoxRow, GameRow, PackAbilityRow, PackItemRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
-import { Button, Card, CardHeader, Input, Select } from "../components/ui";
+import { Button, Card, CardHeader, Input, Select, Modal, GhostButton } from "../components/ui";
 import { DataTable } from "../components/DataTable";
 
 export default function GameBox() {
@@ -14,6 +14,7 @@ export default function GameBox() {
   const [search, setSearch] = useState("");
   const [typeId, setTypeId] = useState("");
   const [minOverall, setMinOverall] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const { data: game } = useQuery<GameRow | null>({
     queryKey: ["games", gameId],
@@ -237,9 +238,7 @@ export default function GameBox() {
           <Input placeholder="Min Overall" value={minOverall} onChange={(e) => setMinOverall(e.target.value)} />
           <Button
             onClick={() => {
-              if (window.confirm("Clear all box entries for this game?")) {
-                clearBox.mutate();
-              }
+              setConfirmOpen(true);
             }}
             type="button"
           >
@@ -250,6 +249,23 @@ export default function GameBox() {
           <DataTable data={filteredBox} columns={columns} />
         </div>
       </Card>
+      <Modal title="Clear Box?" isOpen={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <div className="text-sm text-slate-600">This will remove all box entries for this game.</div>
+        <div className="mt-4 flex gap-2">
+          <Button
+            onClick={() => {
+              clearBox.mutate();
+              setConfirmOpen(false);
+            }}
+            type="button"
+          >
+            Clear Box
+          </Button>
+          <GhostButton onClick={() => setConfirmOpen(false)} type="button">
+            Cancel
+          </GhostButton>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { PackRow } from "../lib/types";
-import { Button, Card, CardHeader, Input } from "../components/ui";
+import { Button, Card, CardHeader, Input, Modal, GhostButton } from "../components/ui";
 
 const schema = z.object({
   name: z.string().min(1),
@@ -43,6 +43,10 @@ export default function Packs() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmBody, setConfirmBody] = useState<string[]>([]);
+  const [confirmAction, setConfirmAction] = useState<null | (() => void)>(null);
 
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
@@ -113,11 +117,23 @@ export default function Packs() {
                           speciesAbilities: number;
                         }>(`/packs/${pack.id}/summary`);
 
-                        const message = `Delete pack "${pack.name}"?\n\nThis will also remove:\n- Types: ${summary.types}\n- Species: ${summary.species}\n- Abilities: ${summary.abilities}\n- Items: ${summary.items}\n- Games: ${summary.games}\n- Game Allowed Species: ${summary.allowedSpecies}\n- Game Allowed Abilities: ${summary.allowedAbilities}\n- Game Allowed Items: ${summary.allowedItems}\n- Game Species Overrides: ${summary.speciesOverrides}\n- Game Species Abilities: ${summary.speciesAbilities}\n- Box Pokemon: ${summary.boxPokemon}\n- Team Slots: ${summary.teamSlots}\n\nThis action cannot be undone.`;
-
-                        if (window.confirm(message)) {
-                          remove.mutate(pack.id);
-                        }
+                        setConfirmTitle(`Delete pack "${pack.name}"?`);
+                        setConfirmBody([
+                          `Types: ${summary.types}`,
+                          `Species: ${summary.species}`,
+                          `Abilities: ${summary.abilities}`,
+                          `Items: ${summary.items}`,
+                          `Games: ${summary.games}`,
+                          `Game Allowed Species: ${summary.allowedSpecies}`,
+                          `Game Allowed Abilities: ${summary.allowedAbilities}`,
+                          `Game Allowed Items: ${summary.allowedItems}`,
+                          `Game Species Overrides: ${summary.speciesOverrides}`,
+                          `Game Species Abilities: ${summary.speciesAbilities}`,
+                          `Box Pokemon: ${summary.boxPokemon}`,
+                          `Team Slots: ${summary.teamSlots}`
+                        ]);
+                        setConfirmAction(() => () => remove.mutate(pack.id));
+                        setConfirmOpen(true);
                       }}
                       type="button"
                     >
@@ -144,6 +160,29 @@ export default function Packs() {
           ))}
         </div>
       </Card>
+      <Modal title={confirmTitle} isOpen={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <div className="text-sm text-slate-600 space-y-1">
+          <div>This will also remove:</div>
+          {confirmBody.map((line) => (
+            <div key={line}>• {line}</div>
+          ))}
+          <div className="mt-3 text-xs text-slate-500">This action cannot be undone.</div>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <Button
+            onClick={() => {
+              confirmAction?.();
+              setConfirmOpen(false);
+            }}
+            type="button"
+          >
+            Delete
+          </Button>
+          <GhostButton onClick={() => setConfirmOpen(false)} type="button">
+            Cancel
+          </GhostButton>
+        </div>
+      </Modal>
     </div>
   );
 }
