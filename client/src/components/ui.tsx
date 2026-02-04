@@ -13,23 +13,38 @@ export function CardHeader({ title, subtitle }: { title: string; subtitle?: stri
   );
 }
 
-export function Button({ children, onClick, type = "button" }: PropsWithChildren<{ onClick?: () => void; type?: "button" | "submit" }>) {
+export function Button({
+  children,
+  className,
+  type = "button",
+  ...props
+}: PropsWithChildren<React.ButtonHTMLAttributes<HTMLButtonElement>>) {
+  const { onClick, ...rest } = props;
   return (
     <button
       type={type}
-      onClick={onClick}
-      className="px-4 py-2 rounded-xl bg-accent text-white font-medium shadow hover:shadow-md transition"
+      {...rest}
+      onClick={(event) => onClick?.(event)}
+      className={`px-4 py-2 rounded-xl bg-accent text-white font-medium shadow hover:shadow-md transition ${className ?? ""}`}
     >
       {children}
     </button>
   );
 }
 
-export function GhostButton({ children, onClick }: PropsWithChildren<{ onClick?: () => void }>) {
+export function GhostButton({
+  children,
+  className,
+  type = "button",
+  ...props
+}: PropsWithChildren<React.ButtonHTMLAttributes<HTMLButtonElement>>) {
+  const { onClick, ...rest } = props;
   return (
     <button
-      onClick={onClick}
-      className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:text-ink hover:border-slate-400 transition"
+      type={type}
+      {...rest}
+      onClick={(event) => onClick?.(event)}
+      className={`px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:text-ink hover:border-slate-400 transition ${className ?? ""}`}
     >
       {children}
     </button>

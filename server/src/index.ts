@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,7 @@ import {
 import { seedIfEmpty } from "./db/seed.js";
 import { computePotentials, computeTeamChart, parseTags } from "./scoring.js";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 
 const app = express();
 app.use(cors());
@@ -154,8 +155,95 @@ app.put("/api/packs/:id", async (req, res) => {
 
 app.delete("/api/packs/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
-  await db.delete(packs).where(eq(packs.id, id));
+  db.transaction((tx) => {
+    const gameRows = tx.select({ id: games.id }).from(games).where(eq(games.packId, id)).all();
+    const gameIds = gameRows.map((g) => g.id);
+
+    if (gameIds.length > 0) {
+      tx.delete(teamSlots).where(inArray(teamSlots.gameId, gameIds)).run();
+      tx.delete(boxPokemon).where(inArray(boxPokemon.gameId, gameIds)).run();
+      tx.delete(gameSpeciesAbilities).where(inArray(gameSpeciesAbilities.gameId, gameIds)).run();
+      tx.delete(gameSpeciesOverrides).where(inArray(gameSpeciesOverrides.gameId, gameIds)).run();
+      tx.delete(gameSpecies).where(inArray(gameSpecies.gameId, gameIds)).run();
+      tx.delete(gameAbilities).where(inArray(gameAbilities.gameId, gameIds)).run();
+      tx.delete(gameItems).where(inArray(gameItems.gameId, gameIds)).run();
+      tx.delete(games).where(inArray(games.id, gameIds)).run();
+    }
+
+    tx.delete(packSpeciesAbilities).where(eq(packSpeciesAbilities.packId, id)).run();
+    tx.delete(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, id)).run();
+    tx.delete(packSpecies).where(eq(packSpecies.packId, id)).run();
+    tx.delete(packAbilities).where(eq(packAbilities.packId, id)).run();
+    tx.delete(packItems).where(eq(packItems.packId, id)).run();
+    tx.delete(packTypes).where(eq(packTypes.packId, id)).run();
+    tx.delete(packs).where(eq(packs.id, id)).run();
+  });
   res.json({ ok: true });
+});
+
+app.get("/api/packs/:id/summary", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+
+  const [typesCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(packTypes)
+    .where(eq(packTypes.packId, packId));
+  const [speciesCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(packSpecies)
+    .where(eq(packSpecies.packId, packId));
+  const [abilitiesCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(packAbilities)
+    .where(eq(packAbilities.packId, packId));
+  const [itemsCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(packItems)
+    .where(eq(packItems.packId, packId));
+  const [gamesCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(games)
+    .where(eq(games.packId, packId));
+
+  const gameRows = await db.select({ id: games.id }).from(games).where(eq(games.packId, packId));
+  const gameIds = gameRows.map((g) => g.id);
+
+  const [boxCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(boxPokemon).where(inArray(boxPokemon.gameId, gameIds))
+    : [{ count: 0 }];
+  const [teamSlotsCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(teamSlots).where(inArray(teamSlots.gameId, gameIds))
+    : [{ count: 0 }];
+  const [allowedSpeciesCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(gameSpecies).where(inArray(gameSpecies.gameId, gameIds))
+    : [{ count: 0 }];
+  const [allowedAbilitiesCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(gameAbilities).where(inArray(gameAbilities.gameId, gameIds))
+    : [{ count: 0 }];
+  const [allowedItemsCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(gameItems).where(inArray(gameItems.gameId, gameIds))
+    : [{ count: 0 }];
+  const [speciesOverridesCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(gameSpeciesOverrides).where(inArray(gameSpeciesOverrides.gameId, gameIds))
+    : [{ count: 0 }];
+  const [speciesAbilitiesCount] = gameIds.length
+    ? await db.select({ count: sql<number>`count(*)` }).from(gameSpeciesAbilities).where(inArray(gameSpeciesAbilities.gameId, gameIds))
+    : [{ count: 0 }];
+
+  res.json({
+    types: typesCount?.count ?? 0,
+    species: speciesCount?.count ?? 0,
+    abilities: abilitiesCount?.count ?? 0,
+    items: itemsCount?.count ?? 0,
+    games: gamesCount?.count ?? 0,
+    boxPokemon: boxCount?.count ?? 0,
+    teamSlots: teamSlotsCount?.count ?? 0,
+    allowedSpecies: allowedSpeciesCount?.count ?? 0,
+    allowedAbilities: allowedAbilitiesCount?.count ?? 0,
+    allowedItems: allowedItemsCount?.count ?? 0,
+    speciesOverrides: speciesOverridesCount?.count ?? 0,
+    speciesAbilities: speciesAbilitiesCount?.count ?? 0
+  });
 });
 
 // Pack Types & Chart
@@ -190,7 +278,56 @@ app.put("/api/packs/:id/types/:typeId", async (req, res) => {
 app.delete("/api/packs/:id/types/:typeId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const typeId = idSchema.parse(req.params.typeId);
-  await db.delete(packTypes).where(and(eq(packTypes.id, typeId), eq(packTypes.packId, packId)));
+  db.transaction((tx) => {
+    const normalType = tx
+      .select({ id: packTypes.id })
+      .from(packTypes)
+      .where(and(eq(packTypes.packId, packId), eq(packTypes.name, "Normal")))
+      .get();
+
+    if (!normalType) {
+      throw new Error("Normal type not found in pack.");
+    }
+
+    // Update pack species typing
+    tx
+      .update(packSpecies)
+      .set({ type1Id: normalType.id })
+      .where(and(eq(packSpecies.packId, packId), eq(packSpecies.type1Id, typeId)))
+      .run();
+
+    tx
+      .update(packSpecies)
+      .set({ type2Id: null })
+      .where(and(eq(packSpecies.packId, packId), eq(packSpecies.type2Id, typeId)))
+      .run();
+
+    // Update game overrides to keep consistency
+    tx
+      .update(gameSpeciesOverrides)
+      .set({ type1Id: normalType.id })
+      .where(eq(gameSpeciesOverrides.type1Id, typeId))
+      .run();
+
+    tx
+      .update(gameSpeciesOverrides)
+      .set({ type2Id: null })
+      .where(eq(gameSpeciesOverrides.type2Id, typeId))
+      .run();
+
+    // Remove type chart rows for this type
+    tx
+      .delete(packTypeEffectiveness)
+      .where(
+        and(
+          eq(packTypeEffectiveness.packId, packId),
+          or(eq(packTypeEffectiveness.attackingTypeId, typeId), eq(packTypeEffectiveness.defendingTypeId, typeId))
+        )
+      )
+      .run();
+
+    tx.delete(packTypes).where(and(eq(packTypes.id, typeId), eq(packTypes.packId, packId))).run();
+  });
   res.json({ ok: true });
 });
 
@@ -254,7 +391,35 @@ app.put("/api/packs/:id/species/:speciesId", async (req, res) => {
 app.delete("/api/packs/:id/species/:speciesId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const speciesId = idSchema.parse(req.params.speciesId);
-  await db.delete(packSpecies).where(and(eq(packSpecies.id, speciesId), eq(packSpecies.packId, packId)));
+  db.transaction((tx) => {
+    const gamesUsingPack = tx.select({ id: games.id }).from(games).where(eq(games.packId, packId)).all();
+    const gameIds = gamesUsingPack.map((g) => g.id);
+
+    if (gameIds.length > 0) {
+      const boxRows = tx
+        .select({ id: boxPokemon.id })
+        .from(boxPokemon)
+        .where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.speciesId, speciesId)))
+        .all();
+      const boxIds = boxRows.map((b) => b.id);
+
+      if (boxIds.length > 0) {
+        tx
+          .update(teamSlots)
+          .set({ boxPokemonId: null })
+          .where(inArray(teamSlots.boxPokemonId, boxIds))
+          .run();
+        tx.delete(boxPokemon).where(inArray(boxPokemon.id, boxIds)).run();
+      }
+
+      tx.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.speciesId, speciesId)).run();
+      tx.delete(gameSpeciesOverrides).where(eq(gameSpeciesOverrides.speciesId, speciesId)).run();
+      tx.delete(gameSpecies).where(and(inArray(gameSpecies.gameId, gameIds), eq(gameSpecies.speciesId, speciesId))).run();
+    }
+
+    tx.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.speciesId, speciesId))).run();
+    tx.delete(packSpecies).where(and(eq(packSpecies.id, speciesId), eq(packSpecies.packId, packId))).run();
+  });
   res.json({ ok: true });
 });
 
@@ -290,7 +455,19 @@ app.put("/api/packs/:id/abilities/:abilityId", async (req, res) => {
 app.delete("/api/packs/:id/abilities/:abilityId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const abilityId = idSchema.parse(req.params.abilityId);
-  await db.delete(packAbilities).where(and(eq(packAbilities.id, abilityId), eq(packAbilities.packId, packId)));
+  db.transaction((tx) => {
+    const gamesUsingPack = tx.select({ id: games.id }).from(games).where(eq(games.packId, packId)).all();
+    const gameIds = gamesUsingPack.map((g) => g.id);
+
+    if (gameIds.length > 0) {
+      tx.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.abilityId, abilityId)).run();
+      tx.delete(gameAbilities).where(and(inArray(gameAbilities.gameId, gameIds), eq(gameAbilities.abilityId, abilityId))).run();
+      tx.delete(boxPokemon).where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.abilityId, abilityId))).run();
+    }
+
+    tx.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.abilityId, abilityId))).run();
+    tx.delete(packAbilities).where(and(eq(packAbilities.id, abilityId), eq(packAbilities.packId, packId))).run();
+  });
   res.json({ ok: true });
 });
 
@@ -326,7 +503,21 @@ app.put("/api/packs/:id/items/:itemId", async (req, res) => {
 app.delete("/api/packs/:id/items/:itemId", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const itemId = idSchema.parse(req.params.itemId);
-  await db.delete(packItems).where(and(eq(packItems.id, itemId), eq(packItems.packId, packId)));
+  db.transaction((tx) => {
+    const gamesUsingPack = tx.select({ id: games.id }).from(games).where(eq(games.packId, packId)).all();
+    const gameIds = gamesUsingPack.map((g) => g.id);
+
+    if (gameIds.length > 0) {
+      tx
+        .update(boxPokemon)
+        .set({ itemId: null })
+        .where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.itemId, itemId)))
+        .run();
+      tx.delete(gameItems).where(and(inArray(gameItems.gameId, gameIds), eq(gameItems.itemId, itemId))).run();
+    }
+
+    tx.delete(packItems).where(and(eq(packItems.id, itemId), eq(packItems.packId, packId))).run();
+  });
   res.json({ ok: true });
 });
 

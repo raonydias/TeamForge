@@ -1,11 +1,16 @@
 const API_BASE = "http://localhost:4000/api";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    ...(options?.headers ?? {})
+  };
+
+  if (options?.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers ?? {})
-    },
+    headers,
     ...options
   });
 
@@ -14,7 +19,13 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(text || "Request failed");
   }
 
-  return res.json() as Promise<T>;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    return res.json() as Promise<T>;
+  }
+
+  const text = await res.text();
+  return (text as T) ?? (undefined as T);
 }
 
 export const api = {

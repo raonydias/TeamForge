@@ -20,9 +20,23 @@ export default function PackTypes() {
   });
 
   const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editMeta, setEditMeta] = useState("");
 
   const createType = useMutation({
     mutationFn: (payload: { name: string }) => api.post<PackTypeRow>(`/packs/${packId}/types`, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
+  });
+
+  const updateType = useMutation({
+    mutationFn: (payload: { id: number; name: string; metadata: string | null }) =>
+      api.put(`/packs/${packId}/types/${payload.id}`, { name: payload.name, metadata: payload.metadata }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
+  });
+
+  const deleteType = useMutation({
+    mutationFn: (idValue: number) => api.del(`/packs/${packId}/types/${idValue}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
   });
 
@@ -53,11 +67,45 @@ export default function PackTypes() {
             Add
           </Button>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 space-y-2">
           {types.map((type) => (
-            <span key={type.id} className="px-3 py-1 rounded-full bg-slate-100 text-sm">
-              {type.name}
-            </span>
+            <div key={type.id} className="flex items-center gap-2">
+              {editingId === type.id ? (
+                <>
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="max-w-[200px]" />
+                  <Input value={editMeta} onChange={(e) => setEditMeta(e.target.value)} className="max-w-[240px]" placeholder="Metadata" />
+                  <Button
+                    onClick={() => {
+                      updateType.mutate({ id: type.id, name: editName.trim(), metadata: editMeta.trim() || null });
+                      setEditingId(null);
+                    }}
+                    type="button"
+                  >
+                    Save
+                  </Button>
+                  <Button onClick={() => setEditingId(null)} type="button">
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="px-3 py-1 rounded-full bg-slate-100 text-sm">{type.name}</span>
+                  <Button
+                    onClick={() => {
+                      setEditingId(type.id);
+                      setEditName(type.name);
+                      setEditMeta(type.metadata ?? "");
+                    }}
+                    type="button"
+                  >
+                    Edit
+                  </Button>
+                  <Button onClick={() => deleteType.mutate(type.id)} type="button">
+                    Delete
+                  </Button>
+                </>
+              )}
+            </div>
           ))}
         </div>
       </Card>

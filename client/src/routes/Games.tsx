@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -40,6 +40,28 @@ export default function Games() {
     }
   });
 
+  const update = useMutation({
+    mutationFn: (payload: { id: number; data: FormValues }) => api.put(`/games/${payload.id}`, payload.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games"] })
+  });
+
+  const remove = useMutation({
+    mutationFn: (idValue: number) => api.del(`/games/${idValue}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games"] })
+  });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editPackId, setEditPackId] = useState<number>(packs[0]?.id ?? 0);
+
+  useEffect(() => {
+    if (!editingId) return;
+    if (packs.length > 0 && !packs.some((p) => p.id === editPackId)) {
+      setEditPackId(packs[0].id);
+    }
+  }, [packs, editPackId, editingId]);
+
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
@@ -62,22 +84,71 @@ export default function Games() {
         <div className="space-y-3">
           {games.map((game) => (
             <div key={game.id} className="border border-slate-100 rounded-xl p-4 flex flex-col gap-2">
-              <div className="font-semibold text-lg">{game.name}</div>
-              {game.notes ? <div className="text-sm text-slate-500">{game.notes}</div> : null}
-              <div className="flex gap-3 text-sm">
-                <Link className="text-accent" to={`/games/${game.id}/setup`}>
-                  Setup
-                </Link>
-                <Link className="text-accent" to={`/games/${game.id}/dex`}>
-                  Dex
-                </Link>
-                <Link className="text-accent" to={`/games/${game.id}/box`}>
-                  Box
-                </Link>
-                <Link className="text-accent" to={`/games/${game.id}/team`}>
-                  Team
-                </Link>
-              </div>
+              {editingId === game.id ? (
+                <>
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notes / rules" />
+                  <Select value={editPackId} onChange={(e) => setEditPackId(Number(e.target.value))}>
+                    {packs.map((pack) => (
+                      <option key={pack.id} value={pack.id}>
+                        {pack.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <div className="flex gap-2 text-sm">
+                    <Button
+                      onClick={() => {
+                        update.mutate({
+                          id: game.id,
+                          data: { name: editName.trim(), notes: editNotes.trim() || null, packId: editPackId }
+                        });
+                        setEditingId(null);
+                      }}
+                      type="button"
+                    >
+                      Save
+                    </Button>
+                    <Button onClick={() => setEditingId(null)} type="button">
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="font-semibold text-lg">{game.name}</div>
+                  {game.notes ? <div className="text-sm text-slate-500">{game.notes}</div> : null}
+                  <div className="flex gap-3 text-sm">
+                    <Link className="text-accent" to={`/games/${game.id}/setup`}>
+                      Setup
+                    </Link>
+                    <Link className="text-accent" to={`/games/${game.id}/dex`}>
+                      Dex
+                    </Link>
+                    <Link className="text-accent" to={`/games/${game.id}/box`}>
+                      Box
+                    </Link>
+                    <Link className="text-accent" to={`/games/${game.id}/team`}>
+                      Team
+                    </Link>
+                  </div>
+                  <div className="flex gap-2 text-sm">
+                    <Button
+                      onClick={() => {
+                        setEditingId(game.id);
+                        setEditName(game.name);
+                        setEditNotes(game.notes ?? "");
+                        setEditPackId(game.packId);
+                      }}
+                      type="button"
+                    >
+                      Edit
+                    </Button>
+                    <Button onClick={() => remove.mutate(game.id)} type="button">
+                      Delete
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>

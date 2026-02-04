@@ -73,6 +73,19 @@ export default function PackSpecies() {
     }
   });
 
+  const update = useMutation({
+    mutationFn: (payload: { id: number; data: FormValues }) =>
+      api.put(`/packs/${packId}/species/${payload.id}`, payload.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] })
+  });
+
+  const remove = useMutation({
+    mutationFn: (idValue: number) => api.del(`/packs/${packId}/species/${idValue}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species"] })
+  });
+
+  const [editingSpeciesId, setEditingSpeciesId] = useState<number | null>(null);
+
   const [selectedSpeciesId, setSelectedSpeciesId] = useState<number | "">("");
   const [slot1, setSlot1] = useState<string>("");
   const [slot2, setSlot2] = useState<string>("");
@@ -109,12 +122,15 @@ export default function PackSpecies() {
         <CardHeader title="Add Species" subtitle="Base stats + typing." />
         <form
           className="space-y-3"
-          onSubmit={form.handleSubmit((values) =>
-            create.mutate({
-              ...values,
-              type2Id: values.type2Id && values.type2Id > 0 ? values.type2Id : null
-            })
-          )}
+          onSubmit={form.handleSubmit((values) => {
+            const payload = { ...values, type2Id: values.type2Id && values.type2Id > 0 ? values.type2Id : null };
+            if (editingSpeciesId) {
+              update.mutate({ id: editingSpeciesId, data: payload });
+              setEditingSpeciesId(null);
+            } else {
+              create.mutate(payload);
+            }
+          })}
         >
           <Input placeholder="Name" {...form.register("name")} />
           <div className="grid grid-cols-2 gap-2">
@@ -142,7 +158,19 @@ export default function PackSpecies() {
             <Input type="number" placeholder="SpD" {...form.register("spd")} />
             <Input type="number" placeholder="Spe" {...form.register("spe")} />
           </div>
-          <Button type="submit">Save</Button>
+          <div className="flex gap-2">
+            <Button type="submit">{editingSpeciesId ? "Update" : "Save"}</Button>
+            {editingSpeciesId ? (
+              <GhostButton
+                onClick={() => {
+                  setEditingSpeciesId(null);
+                  form.reset();
+                }}
+              >
+                Cancel
+              </GhostButton>
+            ) : null}
+          </div>
         </form>
       </Card>
       <div className="space-y-6">
@@ -160,6 +188,7 @@ export default function PackSpecies() {
                   <th>SpA</th>
                   <th>SpD</th>
                   <th>Spe</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -173,6 +202,30 @@ export default function PackSpecies() {
                     <td>{s.spa}</td>
                     <td>{s.spd}</td>
                     <td>{s.spe}</td>
+                    <td className="text-right">
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          onClick={() => {
+                            setEditingSpeciesId(s.id);
+                            form.setValue("name", s.name);
+                            form.setValue("type1Id", s.type1Id);
+                            form.setValue("type2Id", s.type2Id ?? null);
+                            form.setValue("hp", s.hp);
+                            form.setValue("atk", s.atk);
+                            form.setValue("def", s.def);
+                            form.setValue("spa", s.spa);
+                            form.setValue("spd", s.spd);
+                            form.setValue("spe", s.spe);
+                          }}
+                          type="button"
+                        >
+                          Edit
+                        </Button>
+                        <Button onClick={() => remove.mutate(s.id)} type="button">
+                          Delete
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
