@@ -11,7 +11,8 @@ import { Button, Card, CardHeader, Input, Select } from "../components/ui";
 const schema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
-  packId: z.coerce.number().int()
+  packId: z.coerce.number().int(),
+  disableAbilities: z.boolean().optional()
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -23,7 +24,7 @@ export default function Games() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", notes: "", packId: packs[0]?.id ?? 0 }
+    defaultValues: { name: "", notes: "", packId: packs[0]?.id ?? 0, disableAbilities: false }
   });
 
   useEffect(() => {
@@ -53,6 +54,7 @@ export default function Games() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [editDisableAbilities, setEditDisableAbilities] = useState(false);
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
@@ -67,6 +69,10 @@ export default function Games() {
               </option>
             ))}
           </Select>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" {...form.register("disableAbilities")} />
+            Disable Abilities
+          </label>
           <Button type="submit">Create</Button>
         </form>
       </Card>
@@ -79,12 +85,25 @@ export default function Games() {
                 <>
                   <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
                   <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notes / rules" />
+                  <label className="flex items-center gap-2 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={editDisableAbilities}
+                      onChange={(e) => setEditDisableAbilities(e.target.checked)}
+                    />
+                    Disable Abilities
+                  </label>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
                         update.mutate({
                           id: game.id,
-                          data: { name: editName.trim(), notes: editNotes.trim() || null, packId: game.packId }
+                          data: {
+                            name: editName.trim(),
+                            notes: editNotes.trim() || null,
+                            packId: game.packId,
+                            disableAbilities: editDisableAbilities
+                          }
                         });
                         setEditingId(null);
                       }}
@@ -124,6 +143,7 @@ export default function Games() {
                         setEditingId(game.id);
                         setEditName(game.name);
                         setEditNotes(game.notes ?? "");
+                        setEditDisableAbilities(game.disableAbilities);
                       }}
                       type="button"
                     >

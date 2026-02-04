@@ -96,7 +96,8 @@ const speciesEvolutionSchema = z.object({
 const gameSchema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
-  packId: idSchema
+  packId: idSchema,
+  disableAbilities: z.boolean().optional().nullable()
 });
 
 const allowedSchema = z.object({
@@ -700,20 +701,29 @@ app.post("/api/packs/:id/species-abilities", async (req, res) => {
 // Games
 app.get("/api/games", async (_req, res) => {
   const rows = await db.select().from(games).orderBy(games.name);
-  res.json(rows);
+  res.json(rows.map((row) => ({ ...row, disableAbilities: !!row.disableAbilities })));
 });
 
 app.get("/api/games/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const [row] = await db.select().from(games).where(eq(games.id, id));
-  res.json(row ?? null);
+  if (!row) {
+    res.json(null);
+    return;
+  }
+  res.json({ ...row, disableAbilities: !!row.disableAbilities });
 });
 
 app.post("/api/games", async (req, res) => {
   const data = gameSchema.parse(req.body);
   const [row] = await db
     .insert(games)
-    .values({ name: data.name, notes: data.notes ?? null, packId: data.packId })
+    .values({
+      name: data.name,
+      notes: data.notes ?? null,
+      packId: data.packId,
+      disableAbilities: data.disableAbilities ? 1 : 0
+    })
     .returning();
 
   const packSpeciesRows = await db.select({ id: packSpecies.id }).from(packSpecies).where(eq(packSpecies.packId, data.packId));
@@ -732,7 +742,7 @@ app.post("/api/games", async (req, res) => {
   if (packItemsRows.length > 0) {
     await db.insert(gameItems).values(packItemsRows.map((i) => ({ gameId: row.id, itemId: i.id })));
   }
-  res.json(row);
+  res.json({ ...row, disableAbilities: !!row.disableAbilities });
 });
 
 app.put("/api/games/:id", async (req, res) => {
@@ -740,10 +750,15 @@ app.put("/api/games/:id", async (req, res) => {
   const data = gameSchema.parse(req.body);
   const [row] = await db
     .update(games)
-    .set({ name: data.name, notes: data.notes ?? null, packId: data.packId })
+    .set({
+      name: data.name,
+      notes: data.notes ?? null,
+      packId: data.packId,
+      disableAbilities: data.disableAbilities ? 1 : 0
+    })
     .where(eq(games.id, id))
     .returning();
-  res.json(row);
+  res.json({ ...row, disableAbilities: !!row.disableAbilities });
 });
 
 app.delete("/api/games/:id", async (req, res) => {
@@ -901,6 +916,7 @@ app.get("/api/games/:id/box", async (req, res) => {
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
   const packId = game[0].packId;
+  const disableAbilities = !!game[0].disableAbilities;
   const pack = await getPackById(packId);
   const useSingleSpecial = pack?.useSingleSpecial ?? false;
 
@@ -961,7 +977,7 @@ app.get("/api/games/:id/box", async (req, res) => {
         spe: row.oSpe
       });
 
-      const tags = [...parseTags(row.abilityTags), ...parseTags(row.itemTags)];
+      const tags = [...(disableAbilities ? [] : parseTags(row.abilityTags)), ...parseTags(row.itemTags)];
       const effectiveSpd = useSingleSpecial ? effective.spa : effective.spd;
       const potentials = await computePotentials(
         {
@@ -977,6 +993,9 @@ app.get("/api/games/:id/box", async (req, res) => {
 
       return {
         ...row,
+        abilityId: disableAbilities ? null : row.abilityId,
+        abilityName: disableAbilities ? null : row.abilityName,
+        abilityTags: disableAbilities ? null : row.abilityTags,
         type1Id: effective.type1Id,
         type2Id: effective.type2Id,
         hp: effective.hp,
@@ -998,13 +1017,16 @@ app.get("/api/games/:id/box", async (req, res) => {
 app.post("/api/games/:id/box", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
   const data = boxSchema.parse(req.body);
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  const disableAbilities = !!game.disableAbilities;
 
   const [row] = await db
     .insert(boxPokemon)
     .values({
       gameId,
       speciesId: data.speciesId,
-      abilityId: data.abilityId ?? null,
+      abilityId: disableAbilities ? null : data.abilityId ?? null,
       itemId: data.itemId ?? null,
       nickname: data.nickname ?? null,
       notes: data.notes ?? null
@@ -1018,13 +1040,16 @@ app.put("/api/games/:id/box/:boxId", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
   const boxId = idSchema.parse(req.params.boxId);
   const data = boxSchema.parse(req.body);
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  const disableAbilities = !!game.disableAbilities;
 
   const [row] = await db
     .update(boxPokemon)
     .set({
       gameId,
       speciesId: data.speciesId,
-      abilityId: data.abilityId ?? null,
+      abilityId: disableAbilities ? null : data.abilityId ?? null,
       itemId: data.itemId ?? null,
       nickname: data.nickname ?? null,
       notes: data.notes ?? null
@@ -1097,6 +1122,7 @@ async function buildTeamData(
   const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
   if (game.length === 0) return null;
   const packId = game[0].packId;
+  const disableAbilities = !!game[0].disableAbilities;
 
   await ensureTeamSlots(gameId);
 
@@ -1151,7 +1177,7 @@ async function buildTeamData(
           type2Id,
           type1Name: typeNameById.get(type1Id) ?? null,
           type2Name: type2Id ? typeNameById.get(type2Id) ?? null : null,
-          tags: [...parseTags(m.abilityTags), ...parseTags(m.itemTags)]
+          tags: [...(disableAbilities ? [] : parseTags(m.abilityTags)), ...parseTags(m.itemTags)]
         }
       ];
     })

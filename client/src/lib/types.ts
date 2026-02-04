@@ -71,6 +71,7 @@ export type GameRow = {
   packId: number;
   name: string;
   notes: string | null;
+  disableAbilities: boolean;
 };
 
 export type BoxRow = {

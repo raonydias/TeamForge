@@ -11,7 +11,9 @@ function ToggleList({
   selected,
   onToggle,
   onSelectAll,
-  onClear
+  onClear,
+  disabled = false,
+  disabledHint
 }: {
   title: string;
   items: { id: number; name: string }[];
@@ -19,22 +21,25 @@ function ToggleList({
   onToggle: (id: number) => void;
   onSelectAll: () => void;
   onClear: () => void;
+  disabled?: boolean;
+  disabledHint?: string;
 }) {
   return (
     <Card>
       <CardHeader title={title} subtitle="Toggle to include in this game." />
       <div className="flex gap-2 mb-3">
-        <Button onClick={onSelectAll} type="button">
+        <Button onClick={onSelectAll} type="button" disabled={disabled}>
           Select All
         </Button>
-        <Button onClick={onClear} type="button">
+        <Button onClick={onClear} type="button" disabled={disabled}>
           Clear
         </Button>
       </div>
+      {disabledHint ? <div className="text-xs text-slate-500 mb-2">{disabledHint}</div> : null}
       <div className="space-y-2 max-h-[420px] overflow-auto">
         {items.map((item) => (
           <label key={item.id} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={selected.has(item.id)} onChange={() => onToggle(item.id)} />
+            <input type="checkbox" checked={selected.has(item.id)} onChange={() => onToggle(item.id)} disabled={disabled} />
             <span>{item.name}</span>
           </label>
         ))}
@@ -122,7 +127,9 @@ export default function GameSetup() {
   const updateAllowed = useMutation({
     mutationFn: async () => {
       await api.put(`/games/${gameId}/allowed-species`, { ids: Array.from(speciesSet) });
-      await api.put(`/games/${gameId}/allowed-abilities`, { ids: Array.from(abilitiesSet) });
+      if (!game?.disableAbilities) {
+        await api.put(`/games/${gameId}/allowed-abilities`, { ids: Array.from(abilitiesSet) });
+      }
       await api.put(`/games/${gameId}/allowed-items`, { ids: Array.from(itemsSet) });
     },
     onSuccess: () => {
@@ -163,6 +170,8 @@ export default function GameSetup() {
           }}
           onSelectAll={() => setAbilitiesSet(new Set(abilities.map((a) => a.id)))}
           onClear={() => setAbilitiesSet(new Set())}
+          disabled={!!game?.disableAbilities}
+          disabledHint={game?.disableAbilities ? "Abilities are disabled for this game." : undefined}
         />
         <ToggleList
           title="Allowed Items"

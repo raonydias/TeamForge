@@ -154,7 +154,8 @@ export default function GameBox() {
     .filter((row) => row.speciesId === Number(form.speciesId))
     .map((row) => row.abilityId);
   const speciesAbilityOptions = allowedAbilitiesList.filter((a) => speciesAbilityIds.includes(a.id));
-  const abilitiesLocked = speciesAbilityOptions.length === 0;
+  const abilitiesLocked = !!game?.disableAbilities || speciesAbilityOptions.length === 0;
+  const showAbilities = !game?.disableAbilities;
 
   useEffect(() => {
     if (abilitiesLocked && form.abilityId) {
@@ -371,10 +372,11 @@ export default function GameBox() {
         return formatEvolutionMethod(evoList[0].method);
       }
     },
-    {
-      id: "ability",
-      header: "Ability",
-      accessorKey: "abilityName",
+    showAbilities
+      ? {
+          id: "ability",
+          header: "Ability",
+          accessorKey: "abilityName",
       cell: ({ row }) => {
         if (editingId !== row.original.id) return row.original.abilityName ?? "-";
         const abilityIds = speciesAbilities
@@ -393,7 +395,8 @@ export default function GameBox() {
           </Select>
         );
       }
-    },
+    }
+      : null,
     {
       id: "item",
       header: "Item",
@@ -472,7 +475,8 @@ export default function GameBox() {
                     .filter((s) => s.speciesId === row.original.speciesId)
                     .map((s) => s.abilityId);
                   const options = allowedAbilitiesList.filter((a) => abilityIds.includes(a.id));
-                  const abilityIdValue = options.length > 0 && editAbilityId ? Number(editAbilityId) : null;
+                  const abilityIdValue =
+                    game?.disableAbilities || options.length === 0 || !editAbilityId ? null : Number(editAbilityId);
                   update.mutate({
                     id: row.original.id,
                     data: {
@@ -513,7 +517,7 @@ export default function GameBox() {
         </div>
       )
     }
-  ];
+  ].filter(Boolean) as ColumnDef<BoxRow>[];
 
   const filteredBox = box.filter((row) => {
     const matchesSearch = search
@@ -528,7 +532,7 @@ export default function GameBox() {
     <div className="space-y-6">
       <Card>
         <CardHeader title="Add Box Pokemon" subtitle="Choose species, ability, and item." />
-        <div className="grid md:grid-cols-[1fr_1fr_1fr] gap-3">
+        <div className={`grid gap-3 ${showAbilities ? "md:grid-cols-[1fr_1fr_1fr]" : "md:grid-cols-[1fr_1fr]"}`}>
           <Select
             value={form.speciesId}
             onChange={(e) => setForm((f) => ({ ...f, speciesId: Number(e.target.value) }))}
@@ -539,18 +543,20 @@ export default function GameBox() {
               </option>
             ))}
           </Select>
-          <Select
-            value={form.abilityId}
-            onChange={(e) => setForm((f) => ({ ...f, abilityId: e.target.value }))}
-            disabled={abilitiesLocked}
-          >
-            <option value="">No Ability</option>
-            {speciesAbilityOptions.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
+          {showAbilities ? (
+            <Select
+              value={form.abilityId}
+              onChange={(e) => setForm((f) => ({ ...f, abilityId: e.target.value }))}
+              disabled={abilitiesLocked}
+            >
+              <option value="">No Ability</option>
+              {speciesAbilityOptions.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <Select value={form.itemId} onChange={(e) => setForm((f) => ({ ...f, itemId: e.target.value }))}>
             <option value="">No Item</option>
             {usableItems.map((i) => (

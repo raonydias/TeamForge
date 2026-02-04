@@ -31,6 +31,12 @@
       "version": "0004",
       "when": 1700000000004,
       "tag": "0004_packs_use_single_special"
+    },
+    {
+      "idx": 5,
+      "version": "0005",
+      "when": 1700000000005,
+      "tag": "0005_games_disable_abilities"
     }
   ]
 }
