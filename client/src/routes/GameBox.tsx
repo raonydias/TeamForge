@@ -156,6 +156,7 @@ export default function GameBox() {
   const speciesAbilityOptions = allowedAbilitiesList.filter((a) => speciesAbilityIds.includes(a.id));
   const abilitiesLocked = !!game?.disableAbilities || speciesAbilityOptions.length === 0;
   const showAbilities = !game?.disableAbilities;
+  const showItems = !game?.disableHeldItems;
 
   useEffect(() => {
     if (abilitiesLocked && form.abilityId) {
@@ -377,27 +378,28 @@ export default function GameBox() {
           id: "ability",
           header: "Ability",
           accessorKey: "abilityName",
-      cell: ({ row }) => {
-        if (editingId !== row.original.id) return row.original.abilityName ?? "-";
-        const abilityIds = speciesAbilities
-          .filter((s) => s.speciesId === row.original.speciesId)
-          .map((s) => s.abilityId);
-        const options = allowedAbilitiesList.filter((a) => abilityIds.includes(a.id));
-        const locked = options.length === 0;
-        return (
-          <Select value={editAbilityId} onChange={(e) => setEditAbilityId(e.target.value)} disabled={locked}>
-            <option value="">No Ability</option>
-            {options.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        );
-      }
-    }
+          cell: ({ row }) => {
+            if (editingId !== row.original.id) return row.original.abilityName ?? "-";
+            const abilityIds = speciesAbilities
+              .filter((s) => s.speciesId === row.original.speciesId)
+              .map((s) => s.abilityId);
+            const options = allowedAbilitiesList.filter((a) => abilityIds.includes(a.id));
+            const locked = options.length === 0;
+            return (
+              <Select value={editAbilityId} onChange={(e) => setEditAbilityId(e.target.value)} disabled={locked}>
+                <option value="">No Ability</option>
+                {options.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </Select>
+            );
+          }
+        }
       : null,
-    {
+    showItems
+      ? {
       id: "item",
       header: "Item",
       accessorKey: "itemName",
@@ -414,7 +416,8 @@ export default function GameBox() {
           </Select>
         );
       }
-    },
+    }
+      : null,
     {
       id: "offP",
       header: "Off P",
@@ -482,7 +485,7 @@ export default function GameBox() {
                     data: {
                       speciesId: row.original.speciesId,
                       abilityId: abilityIdValue,
-                      itemId: editItemId ? Number(editItemId) : null,
+                      itemId: game?.disableHeldItems ? null : editItemId ? Number(editItemId) : null,
                       nickname: row.original.nickname,
                       notes: row.original.notes
                     }
@@ -532,7 +535,15 @@ export default function GameBox() {
     <div className="space-y-6">
       <Card>
         <CardHeader title="Add Box Pokemon" subtitle="Choose species, ability, and item." />
-        <div className={`grid gap-3 ${showAbilities ? "md:grid-cols-[1fr_1fr_1fr]" : "md:grid-cols-[1fr_1fr]"}`}>
+        <div
+          className={`grid gap-3 ${
+            showAbilities && showItems
+              ? "md:grid-cols-[1fr_1fr_1fr]"
+              : showAbilities || showItems
+              ? "md:grid-cols-[1fr_1fr]"
+              : "md:grid-cols-[1fr]"
+          }`}
+        >
           <Select
             value={form.speciesId}
             onChange={(e) => setForm((f) => ({ ...f, speciesId: Number(e.target.value) }))}
@@ -557,14 +568,16 @@ export default function GameBox() {
               ))}
             </Select>
           ) : null}
-          <Select value={form.itemId} onChange={(e) => setForm((f) => ({ ...f, itemId: e.target.value }))}>
-            <option value="">No Item</option>
-            {usableItems.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.name}
-              </option>
-            ))}
-          </Select>
+          {showItems ? (
+            <Select value={form.itemId} onChange={(e) => setForm((f) => ({ ...f, itemId: e.target.value }))}>
+              <option value="">No Item</option>
+              {usableItems.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <Input
             placeholder="Nickname"
             value={form.nickname}

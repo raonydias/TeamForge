@@ -130,7 +130,9 @@ export default function GameSetup() {
       if (!game?.disableAbilities) {
         await api.put(`/games/${gameId}/allowed-abilities`, { ids: Array.from(abilitiesSet) });
       }
-      await api.put(`/games/${gameId}/allowed-items`, { ids: Array.from(itemsSet) });
+      if (!game?.disableHeldItems) {
+        await api.put(`/games/${gameId}/allowed-items`, { ids: Array.from(itemsSet) });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["games", gameId] });
@@ -184,6 +186,8 @@ export default function GameSetup() {
           }}
           onSelectAll={() => setItemsSet(new Set(items.map((i) => i.id)))}
           onClear={() => setItemsSet(new Set())}
+          disabled={!!game?.disableHeldItems}
+          disabledHint={game?.disableHeldItems ? "Held items are disabled for this game." : undefined}
         />
       </div>
     </div>

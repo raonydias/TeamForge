@@ -37,6 +37,12 @@
       "version": "0005",
       "when": 1700000000005,
       "tag": "0005_games_disable_abilities"
+    },
+    {
+      "idx": 6,
+      "version": "0006",
+      "when": 1700000000006,
+      "tag": "0006_games_disable_held_items"
     }
   ]
 }

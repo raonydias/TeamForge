@@ -12,7 +12,8 @@ const schema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
   packId: z.coerce.number().int(),
-  disableAbilities: z.boolean().optional()
+  disableAbilities: z.boolean().optional(),
+  disableHeldItems: z.boolean().optional()
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -24,7 +25,13 @@ export default function Games() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", notes: "", packId: packs[0]?.id ?? 0, disableAbilities: false }
+    defaultValues: {
+      name: "",
+      notes: "",
+      packId: packs[0]?.id ?? 0,
+      disableAbilities: false,
+      disableHeldItems: false
+    }
   });
 
   useEffect(() => {
@@ -55,6 +62,7 @@ export default function Games() {
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [editDisableAbilities, setEditDisableAbilities] = useState(false);
+  const [editDisableHeldItems, setEditDisableHeldItems] = useState(false);
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
@@ -72,6 +80,10 @@ export default function Games() {
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" {...form.register("disableAbilities")} />
             Disable Abilities
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" {...form.register("disableHeldItems")} />
+            Disable Held Items
           </label>
           <Button type="submit">Create</Button>
         </form>
@@ -93,6 +105,14 @@ export default function Games() {
                     />
                     Disable Abilities
                   </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={editDisableHeldItems}
+                      onChange={(e) => setEditDisableHeldItems(e.target.checked)}
+                    />
+                    Disable Held Items
+                  </label>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
@@ -102,7 +122,8 @@ export default function Games() {
                             name: editName.trim(),
                             notes: editNotes.trim() || null,
                             packId: game.packId,
-                            disableAbilities: editDisableAbilities
+                            disableAbilities: editDisableAbilities,
+                            disableHeldItems: editDisableHeldItems
                           }
                         });
                         setEditingId(null);
@@ -144,6 +165,7 @@ export default function Games() {
                         setEditName(game.name);
                         setEditNotes(game.notes ?? "");
                         setEditDisableAbilities(game.disableAbilities);
+                        setEditDisableHeldItems(game.disableHeldItems);
                       }}
                       type="button"
                     >

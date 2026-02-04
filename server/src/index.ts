@@ -97,7 +97,8 @@ const gameSchema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
   packId: idSchema,
-  disableAbilities: z.boolean().optional().nullable()
+  disableAbilities: z.boolean().optional().nullable(),
+  disableHeldItems: z.boolean().optional().nullable()
 });
 
 const allowedSchema = z.object({
@@ -701,7 +702,13 @@ app.post("/api/packs/:id/species-abilities", async (req, res) => {
 // Games
 app.get("/api/games", async (_req, res) => {
   const rows = await db.select().from(games).orderBy(games.name);
-  res.json(rows.map((row) => ({ ...row, disableAbilities: !!row.disableAbilities })));
+  res.json(
+    rows.map((row) => ({
+      ...row,
+      disableAbilities: !!row.disableAbilities,
+      disableHeldItems: !!row.disableHeldItems
+    }))
+  );
 });
 
 app.get("/api/games/:id", async (req, res) => {
@@ -711,7 +718,11 @@ app.get("/api/games/:id", async (req, res) => {
     res.json(null);
     return;
   }
-  res.json({ ...row, disableAbilities: !!row.disableAbilities });
+  res.json({
+    ...row,
+    disableAbilities: !!row.disableAbilities,
+    disableHeldItems: !!row.disableHeldItems
+  });
 });
 
 app.post("/api/games", async (req, res) => {
@@ -722,7 +733,8 @@ app.post("/api/games", async (req, res) => {
       name: data.name,
       notes: data.notes ?? null,
       packId: data.packId,
-      disableAbilities: data.disableAbilities ? 1 : 0
+      disableAbilities: data.disableAbilities ? 1 : 0,
+      disableHeldItems: data.disableHeldItems ? 1 : 0
     })
     .returning();
 
@@ -742,7 +754,11 @@ app.post("/api/games", async (req, res) => {
   if (packItemsRows.length > 0) {
     await db.insert(gameItems).values(packItemsRows.map((i) => ({ gameId: row.id, itemId: i.id })));
   }
-  res.json({ ...row, disableAbilities: !!row.disableAbilities });
+  res.json({
+    ...row,
+    disableAbilities: !!row.disableAbilities,
+    disableHeldItems: !!row.disableHeldItems
+  });
 });
 
 app.put("/api/games/:id", async (req, res) => {
@@ -754,11 +770,16 @@ app.put("/api/games/:id", async (req, res) => {
       name: data.name,
       notes: data.notes ?? null,
       packId: data.packId,
-      disableAbilities: data.disableAbilities ? 1 : 0
+      disableAbilities: data.disableAbilities ? 1 : 0,
+      disableHeldItems: data.disableHeldItems ? 1 : 0
     })
     .where(eq(games.id, id))
     .returning();
-  res.json({ ...row, disableAbilities: !!row.disableAbilities });
+  res.json({
+    ...row,
+    disableAbilities: !!row.disableAbilities,
+    disableHeldItems: !!row.disableHeldItems
+  });
 });
 
 app.delete("/api/games/:id", async (req, res) => {
@@ -917,6 +938,7 @@ app.get("/api/games/:id/box", async (req, res) => {
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
   const packId = game[0].packId;
   const disableAbilities = !!game[0].disableAbilities;
+  const disableHeldItems = !!game[0].disableHeldItems;
   const pack = await getPackById(packId);
   const useSingleSpecial = pack?.useSingleSpecial ?? false;
 
@@ -977,7 +999,10 @@ app.get("/api/games/:id/box", async (req, res) => {
         spe: row.oSpe
       });
 
-      const tags = [...(disableAbilities ? [] : parseTags(row.abilityTags)), ...parseTags(row.itemTags)];
+      const tags = [
+        ...(disableAbilities ? [] : parseTags(row.abilityTags)),
+        ...(disableHeldItems ? [] : parseTags(row.itemTags))
+      ];
       const effectiveSpd = useSingleSpecial ? effective.spa : effective.spd;
       const potentials = await computePotentials(
         {
@@ -996,6 +1021,9 @@ app.get("/api/games/:id/box", async (req, res) => {
         abilityId: disableAbilities ? null : row.abilityId,
         abilityName: disableAbilities ? null : row.abilityName,
         abilityTags: disableAbilities ? null : row.abilityTags,
+        itemId: disableHeldItems ? null : row.itemId,
+        itemName: disableHeldItems ? null : row.itemName,
+        itemTags: disableHeldItems ? null : row.itemTags,
         type1Id: effective.type1Id,
         type2Id: effective.type2Id,
         hp: effective.hp,
@@ -1020,6 +1048,7 @@ app.post("/api/games/:id/box", async (req, res) => {
   const [game] = await db.select().from(games).where(eq(games.id, gameId));
   if (!game) return res.status(404).json({ error: "Game not found" });
   const disableAbilities = !!game.disableAbilities;
+  const disableHeldItems = !!game.disableHeldItems;
 
   const [row] = await db
     .insert(boxPokemon)
@@ -1027,7 +1056,7 @@ app.post("/api/games/:id/box", async (req, res) => {
       gameId,
       speciesId: data.speciesId,
       abilityId: disableAbilities ? null : data.abilityId ?? null,
-      itemId: data.itemId ?? null,
+      itemId: disableHeldItems ? null : data.itemId ?? null,
       nickname: data.nickname ?? null,
       notes: data.notes ?? null
     })
@@ -1043,6 +1072,7 @@ app.put("/api/games/:id/box/:boxId", async (req, res) => {
   const [game] = await db.select().from(games).where(eq(games.id, gameId));
   if (!game) return res.status(404).json({ error: "Game not found" });
   const disableAbilities = !!game.disableAbilities;
+  const disableHeldItems = !!game.disableHeldItems;
 
   const [row] = await db
     .update(boxPokemon)
@@ -1050,7 +1080,7 @@ app.put("/api/games/:id/box/:boxId", async (req, res) => {
       gameId,
       speciesId: data.speciesId,
       abilityId: disableAbilities ? null : data.abilityId ?? null,
-      itemId: data.itemId ?? null,
+      itemId: disableHeldItems ? null : data.itemId ?? null,
       nickname: data.nickname ?? null,
       notes: data.notes ?? null
     })
@@ -1123,6 +1153,7 @@ async function buildTeamData(
   if (game.length === 0) return null;
   const packId = game[0].packId;
   const disableAbilities = !!game[0].disableAbilities;
+  const disableHeldItems = !!game[0].disableHeldItems;
 
   await ensureTeamSlots(gameId);
 
@@ -1177,7 +1208,10 @@ async function buildTeamData(
           type2Id,
           type1Name: typeNameById.get(type1Id) ?? null,
           type2Name: type2Id ? typeNameById.get(type2Id) ?? null : null,
-          tags: [...(disableAbilities ? [] : parseTags(m.abilityTags)), ...parseTags(m.itemTags)]
+          tags: [
+            ...(disableAbilities ? [] : parseTags(m.abilityTags)),
+            ...(disableHeldItems ? [] : parseTags(m.itemTags))
+          ]
         }
       ];
     })

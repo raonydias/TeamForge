@@ -72,6 +72,7 @@ export type GameRow = {
   name: string;
   notes: string | null;
   disableAbilities: boolean;
+  disableHeldItems: boolean;
 };
 
 export type BoxRow = {

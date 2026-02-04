@@ -126,7 +126,8 @@ export const games = sqliteTable(
     packId: integer("pack_id").notNull().references(() => packs.id),
     name: text("name").notNull(),
     notes: text("notes"),
-    disableAbilities: integer("disable_abilities").notNull().default(0)
+    disableAbilities: integer("disable_abilities").notNull().default(0),
+    disableHeldItems: integer("disable_held_items").notNull().default(0)
   },
   (t) => ({
     nameIdx: uniqueIndex("games_name_idx").on(t.name)
