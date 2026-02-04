@@ -2,6 +2,7 @@ pitch.txt
 node_modules
 dist
 client/dist
+client/public/sprites
 server/dist
 data/app.db
 .env

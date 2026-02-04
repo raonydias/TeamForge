@@ -13,6 +13,7 @@ import {
   packAbilities,
   packItems,
   packSpeciesAbilities,
+  packSpeciesEvolutions,
   games,
   gameSpecies,
   gameAbilities,
@@ -83,6 +84,12 @@ const speciesAbilitiesSchema = z.object({
   )
 });
 
+const speciesEvolutionSchema = z.object({
+  fromSpeciesId: idSchema,
+  toSpeciesId: idSchema,
+  method: z.string().min(1)
+});
+
 const gameSchema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
@@ -99,6 +106,10 @@ const boxSchema = z.object({
   itemId: idSchema.optional().nullable(),
   nickname: z.string().optional().nullable(),
   notes: z.string().optional().nullable()
+});
+
+const evolveSchema = z.object({
+  toSpeciesId: idSchema
 });
 
 const teamSchema = z.object({
@@ -171,6 +182,7 @@ app.delete("/api/packs/:id", async (req, res) => {
     }
 
     tx.delete(packSpeciesAbilities).where(eq(packSpeciesAbilities.packId, id)).run();
+    tx.delete(packSpeciesEvolutions).where(eq(packSpeciesEvolutions.packId, id)).run();
     tx.delete(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, id)).run();
     tx.delete(packSpecies).where(eq(packSpecies.packId, id)).run();
     tx.delete(packAbilities).where(eq(packAbilities.packId, id)).run();
@@ -256,11 +268,19 @@ app.get("/api/packs/:id/types", async (req, res) => {
 app.post("/api/packs/:id/types", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = typeSchema.parse(req.body);
-  const [row] = await db
-    .insert(packTypes)
-    .values({ packId, name: data.name, metadata: data.metadata ?? null })
-    .returning();
-  res.json(row);
+  try {
+    const [row] = await db
+      .insert(packTypes)
+      .values({ packId, name: data.name, metadata: data.metadata ?? null })
+      .returning();
+    res.json(row);
+  } catch (err: any) {
+    if (err?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      res.status(409).json({ error: "Type name already exists in this pack." });
+      return;
+    }
+    throw err;
+  }
 });
 
 app.put("/api/packs/:id/types/:typeId", async (req, res) => {
@@ -369,11 +389,19 @@ app.get("/api/packs/:id/species", async (req, res) => {
 app.post("/api/packs/:id/species", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = speciesSchema.parse(req.body);
-  const [row] = await db
-    .insert(packSpecies)
-    .values({ ...data, packId, type2Id: data.type2Id ?? null })
-    .returning();
-  res.json(row);
+  try {
+    const [row] = await db
+      .insert(packSpecies)
+      .values({ ...data, packId, type2Id: data.type2Id ?? null })
+      .returning();
+    res.json(row);
+  } catch (err: any) {
+    if (err?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      res.status(409).json({ error: "Species name already exists in this pack." });
+      return;
+    }
+    throw err;
+  }
 });
 
 app.put("/api/packs/:id/species/:speciesId", async (req, res) => {
@@ -418,6 +446,15 @@ app.delete("/api/packs/:id/species/:speciesId", async (req, res) => {
     }
 
     tx.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.speciesId, speciesId))).run();
+    tx
+      .delete(packSpeciesEvolutions)
+      .where(
+        and(
+          eq(packSpeciesEvolutions.packId, packId),
+          or(eq(packSpeciesEvolutions.fromSpeciesId, speciesId), eq(packSpeciesEvolutions.toSpeciesId, speciesId))
+        )
+      )
+      .run();
     tx.delete(packSpecies).where(and(eq(packSpecies.id, speciesId), eq(packSpecies.packId, packId))).run();
   });
   res.json({ ok: true });
@@ -433,11 +470,19 @@ app.get("/api/packs/:id/abilities", async (req, res) => {
 app.post("/api/packs/:id/abilities", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = tagSchema.parse(req.body);
-  const [row] = await db
-    .insert(packAbilities)
-    .values({ packId, name: data.name, tags: JSON.stringify(data.tags ?? []) })
-    .returning();
-  res.json(row);
+  try {
+    const [row] = await db
+      .insert(packAbilities)
+      .values({ packId, name: data.name, tags: JSON.stringify(data.tags ?? []) })
+      .returning();
+    res.json(row);
+  } catch (err: any) {
+    if (err?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      res.status(409).json({ error: "Ability name already exists in this pack." });
+      return;
+    }
+    throw err;
+  }
 });
 
 app.put("/api/packs/:id/abilities/:abilityId", async (req, res) => {
@@ -481,11 +526,19 @@ app.get("/api/packs/:id/items", async (req, res) => {
 app.post("/api/packs/:id/items", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = tagSchema.parse(req.body);
-  const [row] = await db
-    .insert(packItems)
-    .values({ packId, name: data.name, tags: JSON.stringify(data.tags ?? []) })
-    .returning();
-  res.json(row);
+  try {
+    const [row] = await db
+      .insert(packItems)
+      .values({ packId, name: data.name, tags: JSON.stringify(data.tags ?? []) })
+      .returning();
+    res.json(row);
+  } catch (err: any) {
+    if (err?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      res.status(409).json({ error: "Item name already exists in this pack." });
+      return;
+    }
+    throw err;
+  }
 });
 
 app.put("/api/packs/:id/items/:itemId", async (req, res) => {
@@ -526,6 +579,48 @@ app.get("/api/packs/:id/species-abilities", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const rows = await db.select().from(packSpeciesAbilities).where(eq(packSpeciesAbilities.packId, packId));
   res.json(rows);
+});
+
+app.get("/api/packs/:id/species-evolutions", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const fromSpeciesId = typeof req.query.fromSpeciesId === "string" ? Number(req.query.fromSpeciesId) : null;
+  const rows =
+    Number.isFinite(fromSpeciesId) && fromSpeciesId
+      ? await db
+          .select()
+          .from(packSpeciesEvolutions)
+          .where(and(eq(packSpeciesEvolutions.packId, packId), eq(packSpeciesEvolutions.fromSpeciesId, fromSpeciesId)))
+      : await db.select().from(packSpeciesEvolutions).where(eq(packSpeciesEvolutions.packId, packId));
+  res.json(rows);
+});
+
+app.post("/api/packs/:id/species-evolutions", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const data = speciesEvolutionSchema.parse(req.body);
+  const [row] = await db
+    .insert(packSpeciesEvolutions)
+    .values({ packId, fromSpeciesId: data.fromSpeciesId, toSpeciesId: data.toSpeciesId, method: data.method })
+    .returning();
+  res.json(row);
+});
+
+app.put("/api/packs/:id/species-evolutions/:evoId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const evoId = idSchema.parse(req.params.evoId);
+  const data = speciesEvolutionSchema.parse(req.body);
+  const [row] = await db
+    .update(packSpeciesEvolutions)
+    .set({ fromSpeciesId: data.fromSpeciesId, toSpeciesId: data.toSpeciesId, method: data.method })
+    .where(and(eq(packSpeciesEvolutions.id, evoId), eq(packSpeciesEvolutions.packId, packId)))
+    .returning();
+  res.json(row);
+});
+
+app.delete("/api/packs/:id/species-evolutions/:evoId", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const evoId = idSchema.parse(req.params.evoId);
+  await db.delete(packSpeciesEvolutions).where(and(eq(packSpeciesEvolutions.id, evoId), eq(packSpeciesEvolutions.packId, packId)));
+  res.json({ ok: true });
 });
 
 app.post("/api/packs/:id/species-abilities", async (req, res) => {
@@ -870,6 +965,35 @@ app.put("/api/games/:id/box/:boxId", async (req, res) => {
       notes: data.notes ?? null
     })
     .where(eq(boxPokemon.id, boxId))
+    .returning();
+
+  res.json(row);
+});
+
+app.put("/api/games/:id/box/:boxId/evolve", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const boxId = idSchema.parse(req.params.boxId);
+  const data = evolveSchema.parse(req.body);
+
+  const [gameRow] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!gameRow) return res.status(404).json({ error: "Game not found" });
+
+  const [targetSpecies] = await db
+    .select({ id: packSpecies.id })
+    .from(packSpecies)
+    .where(and(eq(packSpecies.id, data.toSpeciesId), eq(packSpecies.packId, gameRow.packId)));
+  if (!targetSpecies) return res.status(400).json({ error: "Target species not in this pack." });
+
+  const [allowed] = await db
+    .select({ speciesId: gameSpecies.speciesId })
+    .from(gameSpecies)
+    .where(and(eq(gameSpecies.gameId, gameId), eq(gameSpecies.speciesId, data.toSpeciesId)));
+  if (!allowed) return res.status(400).json({ error: "Target species not allowed in this game." });
+
+  const [row] = await db
+    .update(boxPokemon)
+    .set({ speciesId: data.toSpeciesId, abilityId: null })
+    .where(and(eq(boxPokemon.id, boxId), eq(boxPokemon.gameId, gameId)))
     .returning();
 
   res.json(row);

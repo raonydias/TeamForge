@@ -55,6 +55,14 @@ export type PackSpeciesAbilityRow = {
   slot: "1" | "2" | "H";
 };
 
+export type PackSpeciesEvolutionRow = {
+  id: number;
+  packId: number;
+  fromSpeciesId: number;
+  toSpeciesId: number;
+  method: string;
+};
+
 export type GameRow = {
   id: number;
   packId: number;

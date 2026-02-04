@@ -97,6 +97,25 @@ export const packSpeciesAbilities = sqliteTable(
   })
 );
 
+export const packSpeciesEvolutions = sqliteTable(
+  "pack_species_evolutions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    packId: integer("pack_id").notNull().references(() => packs.id),
+    fromSpeciesId: integer("from_species_id").notNull().references(() => packSpecies.id),
+    toSpeciesId: integer("to_species_id").notNull().references(() => packSpecies.id),
+    method: text("method").notNull()
+  },
+  (t) => ({
+    packEvoIdx: uniqueIndex("pack_species_evo_pack_from_to_method_idx").on(
+      t.packId,
+      t.fromSpeciesId,
+      t.toSpeciesId,
+      t.method
+    )
+  })
+);
+
 export const games = sqliteTable(
   "games",
   {

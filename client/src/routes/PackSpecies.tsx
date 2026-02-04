@@ -5,8 +5,28 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { PackAbilityRow, PackSpeciesAbilityRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
+import {
+  PackAbilityRow,
+  PackItemRow,
+  PackSpeciesAbilityRow,
+  PackSpeciesEvolutionRow,
+  PackSpeciesRow,
+  PackTypeRow
+} from "../lib/types";
 import { Button, Card, CardHeader, Input, Select, GhostButton } from "../components/ui";
+
+function parseStoredTags(raw: string) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    return raw
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
 
 const schema = z.object({
   name: z.string().min(1),
@@ -35,6 +55,10 @@ export default function PackSpecies() {
     queryKey: ["packs", packId, "abilities"],
     queryFn: () => api.get(`/packs/${packId}/abilities`)
   });
+  const { data: items = [] } = useQuery<PackItemRow[]>({
+    queryKey: ["packs", packId, "items"],
+    queryFn: () => api.get(`/packs/${packId}/items`)
+  });
   const { data: species = [] } = useQuery<PackSpeciesRow[]>({
     queryKey: ["packs", packId, "species"],
     queryFn: () => api.get(`/packs/${packId}/species`)
@@ -42,6 +66,10 @@ export default function PackSpecies() {
   const { data: speciesAbilities = [] } = useQuery<PackSpeciesAbilityRow[]>({
     queryKey: ["packs", packId, "species-abilities"],
     queryFn: () => api.get(`/packs/${packId}/species-abilities`)
+  });
+  const { data: evolutions = [] } = useQuery<PackSpeciesEvolutionRow[]>({
+    queryKey: ["packs", packId, "species-evolutions"],
+    queryFn: () => api.get(`/packs/${packId}/species-evolutions`)
   });
 
   const form = useForm<FormValues>({
@@ -91,6 +119,17 @@ export default function PackSpecies() {
   const [slot2, setSlot2] = useState<string>("");
   const [hiddenSlots, setHiddenSlots] = useState<number[]>([]);
 
+  const [selectedEvolutionSpeciesId, setSelectedEvolutionSpeciesId] = useState<number | "">("");
+  const [evolutionTargetId, setEvolutionTargetId] = useState<number | "">("");
+  const [evolutionType, setEvolutionType] = useState<"Level" | "Item" | "Stone" | "Trade" | "Friendship" | "Custom">(
+    "Level"
+  );
+  const [evolutionLevel, setEvolutionLevel] = useState("");
+  const [evolutionItemId, setEvolutionItemId] = useState<number | "">("");
+  const [evolutionFriendshipTime, setEvolutionFriendshipTime] = useState<"" | "Day" | "Night">("");
+  const [evolutionCustom, setEvolutionCustom] = useState("");
+  const [editingEvolutionId, setEditingEvolutionId] = useState<number | null>(null);
+
   useEffect(() => {
     if (!selectedSpeciesId) return;
     const rows = speciesAbilities.filter((row) => row.speciesId === Number(selectedSpeciesId));
@@ -98,6 +137,68 @@ export default function PackSpecies() {
     setSlot2(rows.find((r) => r.slot === "2")?.abilityId?.toString() ?? "");
     setHiddenSlots(rows.filter((r) => r.slot === "H").map((r) => r.abilityId));
   }, [selectedSpeciesId, speciesAbilities]);
+
+  useEffect(() => {
+    if (!selectedEvolutionSpeciesId) return;
+    setEvolutionTargetId("");
+    setEvolutionType("Level");
+    setEvolutionLevel("");
+    setEvolutionItemId("");
+    setEvolutionFriendshipTime("");
+    setEvolutionCustom("");
+    setEditingEvolutionId(null);
+  }, [selectedEvolutionSpeciesId]);
+
+  function buildMethod(): string | null {
+    if (evolutionType === "Level") {
+      const value = Number(evolutionLevel);
+      if (!Number.isFinite(value) || value <= 0) return null;
+      return `Level ${value}`;
+    }
+    if (evolutionType === "Item") {
+      const item = items.find((i) => i.id === Number(evolutionItemId));
+      if (!item) return null;
+      return `Use ${item.name}`;
+    }
+    if (evolutionType === "Stone") {
+      const item = items.find((i) => i.id === Number(evolutionItemId));
+      if (!item) return null;
+      return `Stone: ${item.name}`;
+    }
+    if (evolutionType === "Trade") {
+      const item = items.find((i) => i.id === Number(evolutionItemId));
+      return item ? `Trade with ${item.name}` : "Trade";
+    }
+    if (evolutionType === "Friendship") {
+      return evolutionFriendshipTime ? `Friendship (${evolutionFriendshipTime})` : "Friendship";
+    }
+    if (evolutionType === "Custom") {
+      return evolutionCustom.trim() ? evolutionCustom.trim() : null;
+    }
+    return null;
+  }
+
+  type ParsedMethod =
+    | { type: "Level"; level: string }
+    | { type: "Item"; itemName: string }
+    | { type: "Stone"; itemName: string }
+    | { type: "Trade"; itemName?: string }
+    | { type: "Friendship"; time?: "" | "Day" | "Night" }
+    | { type: "Custom"; custom: string };
+
+  function parseMethod(method: string): ParsedMethod {
+    const levelMatch = method.match(/^Level\s+(\d+)$/i);
+    if (levelMatch) return { type: "Level" as const, level: levelMatch[1] };
+    const useMatch = method.match(/^Use\s+(.+)$/i);
+    if (useMatch) return { type: "Item" as const, itemName: useMatch[1] };
+    const stoneMatch = method.match(/^Stone:\s+(.+)$/i);
+    if (stoneMatch) return { type: "Stone" as const, itemName: stoneMatch[1] };
+    const tradeMatch = method.match(/^Trade(?:\s+with\s+(.+))?$/i);
+    if (tradeMatch) return { type: "Trade" as const, itemName: tradeMatch[1] ?? "" };
+    const friendMatch = method.match(/^Friendship(?:\s+\((Day|Night)\))?$/i);
+    if (friendMatch) return { type: "Friendship" as const, time: (friendMatch[1] as "Day" | "Night" | undefined) ?? "" };
+    return { type: "Custom" as const, custom: method };
+  }
 
   const saveAbilities = useMutation({
     mutationFn: async () => {
@@ -122,7 +223,51 @@ export default function PackSpecies() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-abilities"] })
   });
 
+  const createEvolution = useMutation({
+    mutationFn: async () => {
+      if (!selectedEvolutionSpeciesId || !evolutionTargetId) return;
+      const method = buildMethod();
+      if (!method) return;
+      await api.post(`/packs/${packId}/species-evolutions`, {
+        fromSpeciesId: Number(selectedEvolutionSpeciesId),
+        toSpeciesId: Number(evolutionTargetId),
+        method
+      });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] })
+  });
+
+  const updateEvolution = useMutation({
+    mutationFn: async () => {
+      if (!editingEvolutionId || !selectedEvolutionSpeciesId || !evolutionTargetId) return;
+      const method = buildMethod();
+      if (!method) return;
+      await api.put(`/packs/${packId}/species-evolutions/${editingEvolutionId}`, {
+        fromSpeciesId: Number(selectedEvolutionSpeciesId),
+        toSpeciesId: Number(evolutionTargetId),
+        method
+      });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] })
+  });
+
+  const removeEvolution = useMutation({
+    mutationFn: (idValue: number) => api.del(`/packs/${packId}/species-evolutions/${idValue}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "species-evolutions"] })
+  });
+
   const abilityOptions = useMemo(() => abilities.map((a) => ({ id: a.id, name: a.name })), [abilities]);
+  const speciesMap = useMemo(() => new Map(species.map((s) => [s.id, s.name])), [species]);
+  const evolutionItems = useMemo(
+    () => items.filter((i) => parseStoredTags(i.tags).includes("evolution:item")),
+    [items]
+  );
+  const evolutionStones = useMemo(
+    () => items.filter((i) => parseStoredTags(i.tags).includes("evolution:stone")),
+    [items]
+  );
+
+  const evolutionsForSelected = evolutions.filter((e) => e.fromSpeciesId === Number(selectedEvolutionSpeciesId));
 
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
@@ -311,6 +456,167 @@ export default function PackSpecies() {
                   setSlot2("");
                   setHiddenSlots([]);
                 }}>Clear</GhostButton>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="Species Evolutions" subtitle="Define evolutions and methods for a species." />
+          <div className="grid md:grid-cols-[240px_1fr] gap-4">
+            <Select
+              value={selectedEvolutionSpeciesId}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSelectedEvolutionSpeciesId(value ? Number(value) : "");
+              }}
+            >
+              <option value="">Select species</option>
+              {species.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+            <div className="space-y-3">
+              <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">Evolves To</div>
+                  <Select
+                    value={evolutionTargetId}
+                    onChange={(e) => setEvolutionTargetId(e.target.value ? Number(e.target.value) : "")}
+                  >
+                    <option value="">Select target</option>
+                    {species
+                      .filter((s) => s.id !== Number(selectedEvolutionSpeciesId))
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                  </Select>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">Method Preset</div>
+                  <Select value={evolutionType} onChange={(e) => setEvolutionType(e.target.value as any)}>
+                    <option value="Level">Level</option>
+                    <option value="Item">Item</option>
+                    <option value="Stone">Stone</option>
+                    <option value="Trade">Trade</option>
+                    <option value="Friendship">Friendship</option>
+                    <option value="Custom">Custom</option>
+                  </Select>
+                </div>
+              </div>
+
+              {evolutionType === "Level" ? (
+                <Input placeholder="Level (e.g. 16)" value={evolutionLevel} onChange={(e) => setEvolutionLevel(e.target.value)} />
+              ) : null}
+
+              {evolutionType === "Item" || evolutionType === "Stone" || evolutionType === "Trade" ? (
+                <Select
+                  value={evolutionItemId}
+                  onChange={(e) => setEvolutionItemId(e.target.value ? Number(e.target.value) : "")}
+                >
+                  <option value="">No Item</option>
+                  {(evolutionType === "Stone" ? evolutionStones : evolutionType === "Item" ? evolutionItems : items).map(
+                    (i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}
+                      </option>
+                    )
+                  )}
+                </Select>
+              ) : null}
+
+              {evolutionType === "Friendship" ? (
+                <Select
+                  value={evolutionFriendshipTime}
+                  onChange={(e) => setEvolutionFriendshipTime(e.target.value as "" | "Day" | "Night")}
+                >
+                  <option value="">Any Time</option>
+                  <option value="Day">Day</option>
+                  <option value="Night">Night</option>
+                </Select>
+              ) : null}
+
+              {evolutionType === "Custom" ? (
+                <Input placeholder="Custom method" value={evolutionCustom} onChange={(e) => setEvolutionCustom(e.target.value)} />
+              ) : null}
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => {
+                    if (editingEvolutionId) {
+                      updateEvolution.mutate();
+                      setEditingEvolutionId(null);
+                    } else {
+                      createEvolution.mutate();
+                    }
+                  }}
+                  type="button"
+                >
+                  {editingEvolutionId ? "Update Evolution" : "Add Evolution"}
+                </Button>
+                <GhostButton
+                  onClick={() => {
+                    setEvolutionTargetId("");
+                    setEvolutionType("Level");
+                    setEvolutionLevel("");
+                    setEvolutionItemId("");
+                    setEvolutionFriendshipTime("");
+                    setEvolutionCustom("");
+                    setEditingEvolutionId(null);
+                  }}
+                  type="button"
+                >
+                  Clear
+                </GhostButton>
+              </div>
+
+              <div className="border-t border-slate-100 pt-3 space-y-2">
+                {evolutionsForSelected.length === 0 ? (
+                  <div className="text-xs text-slate-400">No evolutions defined yet.</div>
+                ) : (
+                  evolutionsForSelected.map((evo) => (
+                    <div key={evo.id} className="flex items-center justify-between text-sm">
+                      <div>
+                        <span className="font-medium">{speciesMap.get(evo.toSpeciesId) ?? "Unknown"}</span>
+                        <span className="text-slate-500"> — {evo.method}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={() => {
+                            setEditingEvolutionId(evo.id);
+                            setEvolutionTargetId(evo.toSpeciesId);
+                            const parsed = parseMethod(evo.method);
+                            setEvolutionType(parsed.type);
+                            setEvolutionLevel(parsed.type === "Level" ? parsed.level : "");
+                            if (parsed.type === "Item" || parsed.type === "Stone" || parsed.type === "Trade") {
+                              const matchName = parsed.itemName ?? "";
+                              const matchItem = items.find((i) => i.name === matchName);
+                              setEvolutionItemId(matchItem ? matchItem.id : "");
+                            } else {
+                              setEvolutionItemId("");
+                            }
+                            if (parsed.type === "Friendship") {
+                              setEvolutionFriendshipTime(parsed.time ?? "");
+                            } else {
+                              setEvolutionFriendshipTime("");
+                            }
+                            setEvolutionCustom(parsed.type === "Custom" ? parsed.custom ?? "" : "");
+                          }}
+                          type="button"
+                        >
+                          Edit
+                        </Button>
+                        <Button onClick={() => removeEvolution.mutate(evo.id)} type="button">
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
