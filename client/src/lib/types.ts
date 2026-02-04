@@ -10,6 +10,7 @@ export type PackTypeRow = {
   name: string;
   metadata: string | null;
   color: string | null;
+  excludeInChart: boolean;
 };
 
 export type PackTypeChartRow = {

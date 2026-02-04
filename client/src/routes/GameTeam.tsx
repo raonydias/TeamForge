@@ -136,9 +136,7 @@ export default function GameTeam() {
               </tr>
             </thead>
             <tbody>
-              {(data?.defenseMatrix ?? [])
-                .filter((row) => row.attackingTypeName !== "???")
-                .map((row) => (
+              {(data?.defenseMatrix ?? []).map((row) => (
                 <tr key={row.attackingTypeId} className="border-t border-slate-100">
                   <td className="py-2 pr-4 font-medium text-slate-700">
                     <TypePill name={row.attackingTypeName} color={row.attackingTypeColor ?? null} />

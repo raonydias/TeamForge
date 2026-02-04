@@ -19,6 +19,12 @@
       "version": "0002",
       "when": 1700000000002,
       "tag": "0002_pack_types_color"
+    },
+    {
+      "idx": 3,
+      "version": "0003",
+      "when": 1700000000003,
+      "tag": "0003_pack_types_exclude_in_chart"
     }
   ]
 }

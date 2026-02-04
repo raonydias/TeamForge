@@ -248,8 +248,8 @@ export default function GameBox() {
     };
 
     return (
-      <div className="overflow-auto border border-slate-200 rounded-xl">
-        <table className="w-full text-xs">
+      <div className="overflow-y-auto overflow-x-visible border border-slate-200 rounded-xl">
+        <table className="w-max text-xs">
           <thead>
             <tr className="text-left text-slate-500 border-b border-slate-200">
               <th className="py-2 px-2">Move</th>
@@ -267,7 +267,7 @@ export default function GameBox() {
             </tr>
           </thead>
           <tbody>
-            {matrix.filter((row) => row.attackingTypeName !== "???").map((row) => (
+            {matrix.map((row) => (
               <tr key={row.attackingTypeId} className="border-t border-slate-100">
                 <td className="py-2 px-2">
                   <TypePill name={row.attackingTypeName} color={row.attackingTypeColor ?? null} />
@@ -661,7 +661,7 @@ export default function GameBox() {
         title="Swap Team Slot"
         isOpen={addToTeamOpen}
         onClose={() => setAddToTeamOpen(false)}
-        className="max-w-[1100px] w-[96vw] max-h-[85vh]"
+        className="w-fit max-w-[95vw] max-h-[85vh]"
       >
         <div className="grid lg:grid-cols-[240px_1fr] gap-4 h-full">
           <div className="space-y-2">
@@ -716,7 +716,7 @@ export default function GameBox() {
               </GhostButton>
             </div>
           </div>
-          <div className="max-h-[70vh] overflow-auto">
+          <div className="max-h-[70vh] overflow-y-auto overflow-x-visible">
             {renderMatrix(
               previewMatrix,
               addToTeamSlotIndex && addToTeamBox

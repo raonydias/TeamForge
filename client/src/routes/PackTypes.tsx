@@ -21,19 +21,32 @@ export default function PackTypes() {
 
   const [name, setName] = useState("");
   const [color, setColor] = useState("#cbd5f5");
+  const [excludeInChart, setExcludeInChart] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editMeta, setEditMeta] = useState("");
   const [editColor, setEditColor] = useState("#cbd5f5");
+  const [editExcludeInChart, setEditExcludeInChart] = useState(false);
+  const [ruleAtk, setRuleAtk] = useState<number | "">("");
+  const [ruleDef, setRuleDef] = useState<number[]>([]);
+  const [ruleMult, setRuleMult] = useState<number>(2);
+  const [hoverAtkId, setHoverAtkId] = useState<number | null>(null);
+  const [hoverDefId, setHoverDefId] = useState<number | null>(null);
 
   const createType = useMutation({
-    mutationFn: (payload: { name: string; color: string | null }) => api.post<PackTypeRow>(`/packs/${packId}/types`, payload),
+    mutationFn: (payload: { name: string; color: string | null; excludeInChart: boolean }) =>
+      api.post<PackTypeRow>(`/packs/${packId}/types`, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
   });
 
   const updateType = useMutation({
-    mutationFn: (payload: { id: number; name: string; metadata: string | null; color: string | null }) =>
-      api.put(`/packs/${packId}/types/${payload.id}`, { name: payload.name, metadata: payload.metadata, color: payload.color }),
+    mutationFn: (payload: { id: number; name: string; metadata: string | null; color: string | null; excludeInChart: boolean }) =>
+      api.put(`/packs/${packId}/types/${payload.id}`, {
+        name: payload.name,
+        metadata: payload.metadata,
+        color: payload.color,
+        excludeInChart: payload.excludeInChart
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
   });
 
@@ -42,16 +55,45 @@ export default function PackTypes() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "types"] })
   });
 
-  const updateChart = useMutation({
-    mutationFn: (payload: Omit<PackTypeChartRow, "packId">) => api.post(`/packs/${packId}/typechart`, payload),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "typechart"] })
-  });
-
   const chartMap = useMemo(() => {
     const map = new Map<string, number>();
     chart.forEach((row) => map.set(`${row.attackingTypeId}-${row.defendingTypeId}`, row.multiplier));
     return map;
   }, [chart]);
+
+  const visibleTypes = useMemo(() => types.filter((t) => !t.excludeInChart), [types]);
+
+  async function applyRule() {
+    if (!ruleAtk || ruleDef.length === 0) return;
+    await Promise.all(
+      ruleDef.map((defId) =>
+        api.post(`/packs/${packId}/typechart`, {
+          attackingTypeId: ruleAtk,
+          defendingTypeId: defId,
+          multiplier: ruleMult
+        })
+      )
+    );
+    queryClient.invalidateQueries({ queryKey: ["packs", packId, "typechart"] });
+  }
+
+  function formatMultiplier(value: number) {
+    if (value === 0) return "0";
+    if (value === 0.25) return "1/4";
+    if (value === 0.5) return "1/2";
+    if (value === 2) return "2x";
+    if (value === 4) return "4x";
+    return value.toString();
+  }
+
+  function multiplierBadgeClass(value: number) {
+    if (value === 0) return "bg-slate-200 text-slate-700";
+    if (value === 0.25) return "bg-emerald-100 text-emerald-700";
+    if (value === 0.5) return "bg-emerald-50 text-emerald-700";
+    if (value === 2) return "bg-rose-50 text-rose-700";
+    if (value === 4) return "bg-rose-200 text-rose-900 border border-rose-300";
+    return "bg-slate-100 text-slate-700";
+  }
 
   return (
     <div className="space-y-6">
@@ -66,61 +108,91 @@ export default function PackTypes() {
             className="h-10 w-10 rounded-lg border border-slate-200 bg-white p-1"
             aria-label="Type color"
           />
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={excludeInChart}
+              onChange={(e) => setExcludeInChart(e.target.checked)}
+            />
+            Exclude from chart
+          </label>
           <Button
             onClick={() => {
               if (!name.trim()) return;
-              createType.mutate({ name: name.trim(), color: color || null });
+              createType.mutate({ name: name.trim(), color: color || null, excludeInChart });
               setName("");
+              setExcludeInChart(false);
             }}
           >
             Add
           </Button>
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {types.map((type) => (
-            <div key={type.id} className="flex items-center gap-2">
+            <div key={type.id} className="rounded-xl border border-slate-200 p-3 bg-white/70">
               {editingId === type.id ? (
-                <>
-                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="max-w-[200px]" />
-                  <Input value={editMeta} onChange={(e) => setEditMeta(e.target.value)} className="max-w-[240px]" placeholder="Metadata" />
-                  <input
-                    type="color"
-                    value={editColor}
-                    onChange={(e) => setEditColor(e.target.value)}
-                    className="h-10 w-10 rounded-lg border border-slate-200 bg-white p-1"
-                    aria-label="Type color"
-                  />
-                  <Button
-                    onClick={() => {
-                      updateType.mutate({ id: type.id, name: editName.trim(), metadata: editMeta.trim() || null, color: editColor || null });
-                      setEditingId(null);
-                    }}
-                    type="button"
-                  >
-                    Save
-                  </Button>
-                  <Button onClick={() => setEditingId(null)} type="button">
-                    Cancel
-                  </Button>
-                </>
+                <div className="space-y-2">
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  <Input value={editMeta} onChange={(e) => setEditMeta(e.target.value)} placeholder="Metadata" />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={editColor}
+                      onChange={(e) => setEditColor(e.target.value)}
+                      className="h-9 w-9 rounded-lg border border-slate-200 bg-white p-1"
+                      aria-label="Type color"
+                    />
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={editExcludeInChart}
+                        onChange={(e) => setEditExcludeInChart(e.target.checked)}
+                      />
+                      Exclude from chart
+                    </label>
+                    <Button
+                      onClick={() => {
+                        updateType.mutate({
+                          id: type.id,
+                          name: editName.trim(),
+                          metadata: editMeta.trim() || null,
+                          color: editColor || null,
+                          excludeInChart: editExcludeInChart
+                        });
+                        setEditingId(null);
+                      }}
+                      type="button"
+                      className="px-3 py-1 text-xs"
+                    >
+                      Save
+                    </Button>
+                    <Button onClick={() => setEditingId(null)} type="button" className="px-3 py-1 text-xs">
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
               ) : (
-                <>
+                <div className="flex items-center justify-between gap-2">
                   <TypePill name={type.name} color={type.color} className="text-sm" />
-                  <Button
-                    onClick={() => {
-                      setEditingId(type.id);
-                      setEditName(type.name);
-                      setEditMeta(type.metadata ?? "");
-                      setEditColor(type.color ?? "#cbd5f5");
-                    }}
-                    type="button"
-                  >
-                    Edit
-                  </Button>
-                  <Button onClick={() => deleteType.mutate(type.id)} type="button">
-                    Delete
-                  </Button>
-                </>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => {
+                        setEditingId(type.id);
+                        setEditName(type.name);
+                        setEditMeta(type.metadata ?? "");
+                        setEditColor(type.color ?? "#cbd5f5");
+                        setEditExcludeInChart(type.excludeInChart ?? false);
+                      }}
+                      type="button"
+                      className="px-3 py-1 text-xs"
+                    >
+                      Edit
+                    </Button>
+                    <Button onClick={() => deleteType.mutate(type.id)} type="button" className="px-3 py-1 text-xs">
+                      Delete
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           ))}
@@ -128,44 +200,128 @@ export default function PackTypes() {
       </Card>
 
       <Card>
-        <CardHeader title="Type Chart" subtitle="Edit effectiveness multipliers for each matchup." />
+        <CardHeader title="Type Chart" subtitle="Define matchups via rules, then review the grid." />
+        <div className="grid lg:grid-cols-[260px_1fr] gap-6 mb-6">
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Attacking Type</div>
+              <select
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+                value={ruleAtk}
+                onChange={(e) => setRuleAtk(e.target.value ? Number(e.target.value) : "")}
+              >
+                <option value="">Select type</option>
+                {visibleTypes.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Defending Types</div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                {visibleTypes.map((t) => (
+                  <label key={t.id} className="flex items-center gap-2 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={ruleDef.includes(t.id)}
+                      onChange={() =>
+                        setRuleDef((prev) => (prev.includes(t.id) ? prev.filter((id) => id !== t.id) : [...prev, t.id]))
+                      }
+                    />
+                    <TypePill name={t.name} color={t.color} />
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Button type="button" onClick={() => setRuleDef(visibleTypes.map((t) => t.id))}>
+                  Select All
+                </Button>
+                <Button type="button" onClick={() => setRuleDef([])}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Multiplier</div>
+              <div className="grid grid-cols-3 gap-2">
+                {[0, 0.25, 0.5, 1, 2, 4].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setRuleMult(value)}
+                    className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                      ruleMult === value ? "border-accent text-accent" : "border-slate-200 text-slate-500"
+                    }`}
+                  >
+                    {formatMultiplier(value)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button type="button" onClick={applyRule}>
+              Apply Rule
+            </Button>
+          </div>
+          <div className="text-sm text-slate-500">
+            Use rules to set multiple matchups at once. The grid below updates after applying.
+          </div>
+        </div>
         <div className="overflow-auto">
-          <table className="min-w-[700px] text-sm border-separate border-spacing-2">
+          <table className="min-w-[700px] text-sm border-separate border-spacing-2 text-center">
             <thead>
               <tr>
-                <th className="text-left text-slate-500">Atk \ Def</th>
-                {types.map((type) => (
-                  <th key={type.id} className="text-left text-slate-600">
+                <th className="text-left text-slate-500 sticky left-0 top-0 z-20">Atk \ Def</th>
+                {visibleTypes.map((type) => (
+                  <th
+                    key={type.id}
+                    className={`text-center text-slate-600 sticky top-0 z-10 ${
+                      hoverDefId === type.id ? "bg-slate-100/80 ring-1 ring-slate-200 rounded-lg" : ""
+                    }`}
+                  >
                     <TypePill name={type.name} color={type.color} />
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {types.map((atk) => (
+              {visibleTypes.map((atk) => (
                 <tr key={atk.id}>
-                  <td className="font-medium text-slate-700">
+                  <td
+                    className={`font-medium text-slate-700 sticky left-0 z-10 text-left ${
+                      hoverAtkId === atk.id ? "bg-slate-100/80 ring-1 ring-slate-200 rounded-lg" : ""
+                    }`}
+                  >
                     <TypePill name={atk.name} color={atk.color} />
                   </td>
-                  {types.map((def) => {
+                  {visibleTypes.map((def) => {
                     const key = `${atk.id}-${def.id}`;
                     const value = chartMap.get(key) ?? 1;
+                    const isHoverRow = hoverAtkId === atk.id;
+                    const isHoverCol = hoverDefId === def.id;
                     return (
-                      <td key={key}>
-                        <Input
-                          type="number"
-                          step="0.5"
-                          value={value}
-                          onChange={(e) => {
-                            const next = Number(e.target.value);
-                            updateChart.mutate({
-                              attackingTypeId: atk.id,
-                              defendingTypeId: def.id,
-                              multiplier: Number.isFinite(next) ? next : 1
-                            });
-                          }}
-                          className="w-20"
-                        />
+                      <td
+                        key={key}
+                        className={`text-center ${
+                          isHoverRow || isHoverCol ? "bg-slate-100/60 ring-1 ring-slate-200 rounded-lg" : ""
+                        }`}
+                        onMouseEnter={() => {
+                          setHoverAtkId(atk.id);
+                          setHoverDefId(def.id);
+                        }}
+                        onMouseLeave={() => {
+                          setHoverAtkId(null);
+                          setHoverDefId(null);
+                        }}
+                      >
+                        <span
+                          className={`inline-flex min-w-[2.75rem] justify-center rounded-lg px-2 py-1 text-xs font-semibold ${multiplierBadgeClass(
+                            value
+                          )}`}
+                        >
+                          {formatMultiplier(value)}
+                        </span>
                       </td>
                     );
                   })}

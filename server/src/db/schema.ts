@@ -19,7 +19,8 @@ export const packTypes = sqliteTable(
     packId: integer("pack_id").notNull().references(() => packs.id),
     name: text("name").notNull(),
     metadata: text("metadata"),
-    color: text("color")
+    color: text("color"),
+    excludeInChart: integer("exclude_in_chart").notNull().default(0)
   },
   (t) => ({
     packTypeIdx: uniqueIndex("pack_types_pack_name_idx").on(t.packId, t.name)

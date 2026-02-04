@@ -49,7 +49,8 @@ const packSchema = z.object({
 const typeSchema = z.object({
   name: z.string().min(1),
   metadata: z.string().optional().nullable(),
-  color: z.string().optional().nullable()
+  color: z.string().optional().nullable(),
+  excludeInChart: z.boolean().optional().nullable()
 });
 
 const typeChartSchema = z.object({
@@ -274,7 +275,12 @@ app.get("/api/packs/:id/summary", async (req, res) => {
 app.get("/api/packs/:id/types", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const rows = await db.select().from(packTypes).where(eq(packTypes.packId, packId)).orderBy(packTypes.name);
-  res.json(rows);
+  res.json(
+    rows.map((row) => ({
+      ...row,
+      excludeInChart: !!row.excludeInChart
+    }))
+  );
 });
 
 app.post("/api/packs/:id/types", async (req, res) => {
@@ -283,9 +289,15 @@ app.post("/api/packs/:id/types", async (req, res) => {
   try {
     const [row] = await db
       .insert(packTypes)
-      .values({ packId, name: data.name, metadata: data.metadata ?? null, color: data.color ?? null })
+      .values({
+        packId,
+        name: data.name,
+        metadata: data.metadata ?? null,
+        color: data.color ?? null,
+        excludeInChart: data.excludeInChart ? 1 : 0
+      })
       .returning();
-    res.json(row);
+    res.json({ ...row, excludeInChart: !!row.excludeInChart });
   } catch (err: any) {
     if (err?.code === "SQLITE_CONSTRAINT_UNIQUE") {
       res.status(409).json({ error: "Type name already exists in this pack." });
@@ -301,10 +313,15 @@ app.put("/api/packs/:id/types/:typeId", async (req, res) => {
   const data = typeSchema.parse(req.body);
   const [row] = await db
     .update(packTypes)
-    .set({ name: data.name, metadata: data.metadata ?? null, color: data.color ?? null })
+    .set({
+      name: data.name,
+      metadata: data.metadata ?? null,
+      color: data.color ?? null,
+      excludeInChart: data.excludeInChart ? 1 : 0
+    })
     .where(and(eq(packTypes.id, typeId), eq(packTypes.packId, packId)))
     .returning();
-  res.json(row);
+  res.json({ ...row, excludeInChart: !!row.excludeInChart });
 });
 
 app.delete("/api/packs/:id/types/:typeId", async (req, res) => {
@@ -1082,6 +1099,7 @@ async function buildTeamData(
 
   const { typesList, typeNameById } = await getPackTypesMap(packId);
   const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
+  const visibleTypes = typesList.filter((t) => !t.excludeInChart);
 
   const membersByBoxId = new Map(
     memberRows.map((m) => {
@@ -1116,7 +1134,7 @@ async function buildTeamData(
 
   const defenseMatrix = computeDefenseMatrix(
     membersForMatrix,
-    typesList.map((t) => ({ id: t.id, name: t.name, color: t.color ?? null })),
+    visibleTypes.map((t) => ({ id: t.id, name: t.name, color: t.color ?? null })),
     chartRows.map((r) => ({
       attackingTypeId: r.attackingTypeId,
       defendingTypeId: r.defendingTypeId,
