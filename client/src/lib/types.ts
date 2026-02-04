@@ -9,6 +9,7 @@ export type PackTypeRow = {
   packId: number;
   name: string;
   metadata: string | null;
+  color: string | null;
 };
 
 export type PackTypeChartRow = {
@@ -115,4 +116,23 @@ export type TeamChartRow = {
   weak: number;
   resist: number;
   immune: number;
+};
+
+export type TeamMemberSummary = {
+  boxPokemonId: number;
+  nickname: string | null;
+  speciesName: string;
+  type1Id: number;
+  type2Id: number | null;
+  type1Name: string | null;
+  type2Name: string | null;
+};
+
+export type TeamDefenseRow = {
+  attackingTypeId: number;
+  attackingTypeName: string;
+  attackingTypeColor?: string | null;
+  multipliers: (number | null)[];
+  totalWeak: number;
+  totalResist: number;
 };

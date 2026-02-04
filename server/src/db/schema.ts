@@ -18,7 +18,8 @@ export const packTypes = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     packId: integer("pack_id").notNull().references(() => packs.id),
     name: text("name").notNull(),
-    metadata: text("metadata")
+    metadata: text("metadata"),
+    color: text("color")
   },
   (t) => ({
     packTypeIdx: uniqueIndex("pack_types_pack_name_idx").on(t.packId, t.name)

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
 import { api } from "../lib/api";
 import { GameRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
-import { Card, CardHeader, Input, Select } from "../components/ui";
+import { Card, CardHeader, Input, Select, TypePill } from "../components/ui";
 import { DataTable } from "../components/DataTable";
 
 export default function GameDex() {
@@ -51,6 +51,8 @@ export default function GameDex() {
     }
   });
 
+  const typeColorByName = useMemo(() => new Map(types.map((t) => [t.name, t.color])), [types]);
+
   const columns: ColumnDef<PackSpeciesRow>[] = [
     {
       id: "name",
@@ -61,7 +63,16 @@ export default function GameDex() {
     {
       id: "types",
       header: "Types",
-      cell: ({ row }) => [row.original.type1Name, row.original.type2Name].filter(Boolean).join(" / ")
+      cell: ({ row }) => {
+        const names = [row.original.type1Name, row.original.type2Name].filter(Boolean) as string[];
+        return (
+          <div className="flex flex-wrap gap-2">
+            {names.map((name) => (
+              <TypePill key={name} name={name} color={typeColorByName.get(name) ?? null} />
+            ))}
+          </div>
+        );
+      }
     },
     { id: "hp", header: "HP", accessorKey: "hp" },
     { id: "atk", header: "Atk", accessorKey: "atk" },

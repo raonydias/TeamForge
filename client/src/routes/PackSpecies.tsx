@@ -13,7 +13,7 @@ import {
   PackSpeciesRow,
   PackTypeRow
 } from "../lib/types";
-import { Button, Card, CardHeader, Input, Select, GhostButton } from "../components/ui";
+import { Button, Card, CardHeader, Input, Select, GhostButton, TypePill } from "../components/ui";
 
 function parseStoredTags(raw: string) {
   try {
@@ -257,6 +257,7 @@ export default function PackSpecies() {
   });
 
   const abilityOptions = useMemo(() => abilities.map((a) => ({ id: a.id, name: a.name })), [abilities]);
+  const typeColorByName = useMemo(() => new Map(types.map((t) => [t.name, t.color])), [types]);
   const speciesMap = useMemo(() => new Map(species.map((s) => [s.id, s.name])), [species]);
   const evolutionItems = useMemo(
     () => items.filter((i) => parseStoredTags(i.tags).includes("evolution:item")),
@@ -348,7 +349,16 @@ export default function PackSpecies() {
                 {species.map((s) => (
                   <tr key={s.id} className="border-t border-slate-100">
                     <td className="py-2 font-medium">{s.name}</td>
-                    <td>{[s.type1Name, s.type2Name].filter(Boolean).join(" /")}</td>
+                    <td>
+                      <div className="flex flex-wrap gap-2">
+                        {[s.type1Name, s.type2Name]
+                          .filter(Boolean)
+                          .map((name) => {
+                            const color = typeColorByName.get(name as string) ?? null;
+                            return <TypePill key={name} name={name as string} color={color} />;
+                          })}
+                      </div>
+                    </td>
                     <td>{s.hp}</td>
                     <td>{s.atk}</td>
                     <td>{s.def}</td>

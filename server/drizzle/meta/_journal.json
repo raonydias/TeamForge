@@ -13,6 +13,12 @@
       "version": "0001",
       "when": 1700000000001,
       "tag": "0001_pack_species_evolutions"
+    },
+    {
+      "idx": 2,
+      "version": "0002",
+      "when": 1700000000002,
+      "tag": "0002_pack_types_color"
     }
   ]
 }

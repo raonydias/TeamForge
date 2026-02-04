@@ -109,3 +109,34 @@ export function Modal({
 export function Badge({ children }: PropsWithChildren) {
   return <span className="inline-flex items-center px-2 py-1 rounded-full bg-slate-100 text-xs text-slate-600">{children}</span>;
 }
+
+function getReadableTextColor(hex: string | null | undefined) {
+  if (!hex) return "#0f172a";
+  const normalized = hex.replace("#", "");
+  if (normalized.length !== 6) return "#0f172a";
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#0f172a" : "#ffffff";
+}
+
+export function TypePill({
+  name,
+  color,
+  className
+}: {
+  name: string;
+  color?: string | null;
+  className?: string;
+}) {
+  const textColor = getReadableTextColor(color);
+  return (
+    <span
+      className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-semibold tracking-wide ${className ?? ""}`}
+      style={{ backgroundColor: color ?? "#e2e8f0", color: textColor }}
+    >
+      {name}
+    </span>
+  );
+}

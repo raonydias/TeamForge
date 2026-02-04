@@ -25,7 +25,7 @@ import {
   settings
 } from "./db/schema.js";
 import { seedIfEmpty } from "./db/seed.js";
-import { computePotentials, computeTeamChart, parseTags } from "./scoring.js";
+import { computePotentials, computeTeamChart, computeDefenseMatrix, parseTags } from "./scoring.js";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 
@@ -48,7 +48,8 @@ const packSchema = z.object({
 
 const typeSchema = z.object({
   name: z.string().min(1),
-  metadata: z.string().optional().nullable()
+  metadata: z.string().optional().nullable(),
+  color: z.string().optional().nullable()
 });
 
 const typeChartSchema = z.object({
@@ -271,7 +272,7 @@ app.post("/api/packs/:id/types", async (req, res) => {
   try {
     const [row] = await db
       .insert(packTypes)
-      .values({ packId, name: data.name, metadata: data.metadata ?? null })
+      .values({ packId, name: data.name, metadata: data.metadata ?? null, color: data.color ?? null })
       .returning();
     res.json(row);
   } catch (err: any) {
@@ -289,7 +290,7 @@ app.put("/api/packs/:id/types/:typeId", async (req, res) => {
   const data = typeSchema.parse(req.body);
   const [row] = await db
     .update(packTypes)
-    .set({ name: data.name, metadata: data.metadata ?? null })
+    .set({ name: data.name, metadata: data.metadata ?? null, color: data.color ?? null })
     .where(and(eq(packTypes.id, typeId), eq(packTypes.packId, packId)))
     .returning();
   res.json(row);
@@ -1036,11 +1037,13 @@ app.get("/api/games/:id/team", async (req, res) => {
   const slots = await db.select().from(teamSlots).where(eq(teamSlots.gameId, gameId)).orderBy(teamSlots.slotIndex);
   const selectedIds = slots.map((s) => s.boxPokemonId).filter(Boolean) as number[];
 
-  const members = selectedIds.length
+  const memberRows = selectedIds.length
     ? await db
         .select({
           id: boxPokemon.id,
+          nickname: boxPokemon.nickname,
           speciesId: boxPokemon.speciesId,
+          speciesName: packSpecies.name,
           abilityTags: packAbilities.tags,
           itemTags: packItems.tags,
           type1Id: packSpecies.type1Id,
@@ -1059,16 +1062,43 @@ app.get("/api/games/:id/team", async (req, res) => {
         .where(inArray(boxPokemon.id, selectedIds))
     : [];
 
-  const { typesList } = await getPackTypesMap(packId);
+  const { typesList, typeNameById } = await getPackTypesMap(packId);
   const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
 
-  const teamChart = computeTeamChart(
-    members.map((m) => ({
-      type1Id: m.oType1Id ?? m.type1Id,
-      type2Id: m.oType2Id ?? m.type2Id,
-      tags: [...parseTags(m.abilityTags), ...parseTags(m.itemTags)]
-    })),
-    typesList.map((t) => ({ id: t.id, name: t.name })),
+  const membersByBoxId = new Map(
+    memberRows.map((m) => {
+      const type1Id = m.oType1Id ?? m.type1Id;
+      const type2Id = m.oType2Id ?? m.type2Id ?? null;
+      return [
+        m.id,
+        {
+          boxPokemonId: m.id,
+          nickname: m.nickname,
+          speciesName: m.speciesName,
+          type1Id,
+          type2Id,
+          type1Name: typeNameById.get(type1Id) ?? null,
+          type2Name: type2Id ? typeNameById.get(type2Id) ?? null : null,
+          tags: [...parseTags(m.abilityTags), ...parseTags(m.itemTags)]
+        }
+      ];
+    })
+  );
+
+  const membersForMatrix = slots.map((slot) => {
+    if (!slot.boxPokemonId) return null;
+    const member = membersByBoxId.get(slot.boxPokemonId);
+    if (!member) return null;
+    return {
+      type1Id: member.type1Id,
+      type2Id: member.type2Id,
+      tags: member.tags
+    };
+  });
+
+  const defenseMatrix = computeDefenseMatrix(
+    membersForMatrix,
+    typesList.map((t) => ({ id: t.id, name: t.name, color: t.color ?? null })),
     chartRows.map((r) => ({
       attackingTypeId: r.attackingTypeId,
       defendingTypeId: r.defendingTypeId,
@@ -1076,7 +1106,9 @@ app.get("/api/games/:id/team", async (req, res) => {
     }))
   );
 
-  res.json({ slots, teamChart });
+  const members = slots.map((slot) => (slot.boxPokemonId ? membersByBoxId.get(slot.boxPokemonId) ?? null : null));
+
+  res.json({ slots, members, defenseMatrix });
 });
 
 app.put("/api/games/:id/team", async (req, res) => {

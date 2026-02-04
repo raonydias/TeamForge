@@ -3,6 +3,7 @@ node_modules
 dist
 client/dist
 client/public/sprites
+client/public/types
 server/dist
 data/app.db
 .env

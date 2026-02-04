@@ -13,7 +13,7 @@ import {
   PackSpeciesRow,
   PackTypeRow
 } from "../lib/types";
-import { Button, Card, CardHeader, Input, Select, Modal, GhostButton } from "../components/ui";
+import { Button, Card, CardHeader, Input, Select, Modal, GhostButton, TypePill } from "../components/ui";
 import { DataTable } from "../components/DataTable";
 
 function parseStoredTags(raw: string) {
@@ -189,6 +189,8 @@ export default function GameBox() {
 
   const speciesNameById = useMemo(() => new Map(species.map((s) => [s.id, s.name])), [species]);
 
+  const typeColorById = useMemo(() => new Map(types.map((t) => [t.id, t.color])), [types]);
+
   const columns: ColumnDef<BoxRow>[] = [
     {
       id: "pokemon",
@@ -205,7 +207,19 @@ export default function GameBox() {
       id: "types",
       header: "Types",
       accessorFn: (row) => [row.type1Name, row.type2Name].filter(Boolean).join(" / "),
-      cell: ({ row }) => [row.original.type1Name, row.original.type2Name].filter(Boolean).join(" / ")
+      cell: ({ row }) => {
+        const entries = [
+          { id: row.original.type1Id, name: row.original.type1Name },
+          { id: row.original.type2Id, name: row.original.type2Name }
+        ].filter((entry) => entry.name) as { id: number; name: string }[];
+        return (
+          <div className="flex flex-wrap gap-2">
+            {entries.map((entry) => (
+              <TypePill key={`${row.original.id}-${entry.id}`} name={entry.name} color={typeColorById.get(entry.id) ?? null} />
+            ))}
+          </div>
+        );
+      }
     },
     {
       id: "evolution",

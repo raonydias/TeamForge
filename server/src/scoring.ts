@@ -27,6 +27,7 @@ export type TypeChartRow = {
 export type TypeInfo = {
   id: number;
   name: string;
+  color?: string | null;
 };
 
 export type TeamMember = {
@@ -175,6 +176,49 @@ export function computeTeamChart(
       weak,
       resist,
       immune
+    };
+  });
+}
+
+export function computeDefenseMatrix(
+  members: (TeamMember | null)[],
+  typesList: TypeInfo[],
+  chartRows: TypeChartRow[]
+) {
+  const chartMap = new Map<string, number>();
+  for (const row of chartRows) {
+    chartMap.set(`${row.attackingTypeId}-${row.defendingTypeId}`, row.multiplier);
+  }
+
+  return typesList.map((atk) => {
+    let weak = 0;
+    let resist = 0;
+
+    const multipliers = members.map((member) => {
+      if (!member) return null;
+      let mult = 1;
+      const typeIds = [member.type1Id, member.type2Id].filter(Boolean) as number[];
+      for (const defId of typeIds) {
+        const value = chartMap.get(`${atk.id}-${defId}`) ?? 1;
+        mult *= value;
+      }
+
+      const tagMult = tagMultiplierForType(member.tags, atk.name);
+      mult *= tagMult;
+
+      if (mult > 1) weak += 1;
+      else if (mult < 1) resist += 1;
+
+      return mult;
+    });
+
+    return {
+      attackingTypeId: atk.id,
+      attackingTypeName: atk.name,
+      attackingTypeColor: atk.color ?? null,
+      multipliers,
+      totalWeak: weak,
+      totalResist: resist
     };
   });
 }
