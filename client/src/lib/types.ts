@@ -82,7 +82,6 @@ export type BoxRow = {
   abilityId: number | null;
   itemId: number | null;
   nickname: string | null;
-  notes: string | null;
   speciesName: string;
   type1Id: number;
   type2Id: number | null;
@@ -105,6 +104,22 @@ export type BoxRow = {
     defensiveSpecial: number;
     overall: number;
   };
+};
+
+export type TrackedRow = {
+  id: number;
+  gameId: number;
+  speciesId: number;
+  abilityId: number | null;
+  itemId: number | null;
+  nickname: string | null;
+  speciesName: string;
+  type1Id: number;
+  type2Id: number | null;
+  type1Name?: string | null;
+  type2Name?: string | null;
+  abilityName: string | null;
+  itemName: string | null;
 };
 
 export type TeamSlot = {

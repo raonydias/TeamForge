@@ -21,6 +21,7 @@ import {
   gameSpeciesOverrides,
   gameSpeciesAbilities,
   boxPokemon,
+  trackedBox,
   teamSlots,
   settings
 } from "./db/schema.js";
@@ -109,8 +110,7 @@ const boxSchema = z.object({
   speciesId: idSchema,
   abilityId: idSchema.optional().nullable(),
   itemId: idSchema.optional().nullable(),
-  nickname: z.string().optional().nullable(),
-  notes: z.string().optional().nullable()
+  nickname: z.string().optional().nullable()
 });
 
 const evolveSchema = z.object({
@@ -211,6 +211,7 @@ app.delete("/api/packs/:id", async (req, res) => {
     if (gameIds.length > 0) {
       tx.delete(teamSlots).where(inArray(teamSlots.gameId, gameIds)).run();
       tx.delete(boxPokemon).where(inArray(boxPokemon.gameId, gameIds)).run();
+      tx.delete(trackedBox).where(inArray(trackedBox.gameId, gameIds)).run();
       tx.delete(gameSpeciesAbilities).where(inArray(gameSpeciesAbilities.gameId, gameIds)).run();
       tx.delete(gameSpeciesOverrides).where(inArray(gameSpeciesOverrides.gameId, gameIds)).run();
       tx.delete(gameSpecies).where(inArray(gameSpecies.gameId, gameIds)).run();
@@ -494,6 +495,7 @@ app.delete("/api/packs/:id/species/:speciesId", async (req, res) => {
         tx.delete(boxPokemon).where(inArray(boxPokemon.id, boxIds)).run();
       }
 
+      tx.delete(trackedBox).where(and(inArray(trackedBox.gameId, gameIds), eq(trackedBox.speciesId, speciesId))).run();
       tx.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.speciesId, speciesId)).run();
       tx.delete(gameSpeciesOverrides).where(eq(gameSpeciesOverrides.speciesId, speciesId)).run();
       tx.delete(gameSpecies).where(and(inArray(gameSpecies.gameId, gameIds), eq(gameSpecies.speciesId, speciesId))).run();
@@ -562,6 +564,7 @@ app.delete("/api/packs/:id/abilities/:abilityId", async (req, res) => {
       tx.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.abilityId, abilityId)).run();
       tx.delete(gameAbilities).where(and(inArray(gameAbilities.gameId, gameIds), eq(gameAbilities.abilityId, abilityId))).run();
       tx.delete(boxPokemon).where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.abilityId, abilityId))).run();
+      tx.delete(trackedBox).where(and(inArray(trackedBox.gameId, gameIds), eq(trackedBox.abilityId, abilityId))).run();
     }
 
     tx.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.abilityId, abilityId))).run();
@@ -619,6 +622,11 @@ app.delete("/api/packs/:id/items/:itemId", async (req, res) => {
         .update(boxPokemon)
         .set({ itemId: null })
         .where(and(inArray(boxPokemon.gameId, gameIds), eq(boxPokemon.itemId, itemId)))
+        .run();
+      tx
+        .update(trackedBox)
+        .set({ itemId: null })
+        .where(and(inArray(trackedBox.gameId, gameIds), eq(trackedBox.itemId, itemId)))
         .run();
       tx.delete(gameItems).where(and(inArray(gameItems.gameId, gameIds), eq(gameItems.itemId, itemId))).run();
     }
@@ -952,7 +960,6 @@ app.get("/api/games/:id/box", async (req, res) => {
       abilityId: boxPokemon.abilityId,
       itemId: boxPokemon.itemId,
       nickname: boxPokemon.nickname,
-      notes: boxPokemon.notes,
       speciesName: packSpecies.name,
       type1Id: packSpecies.type1Id,
       type2Id: packSpecies.type2Id,
@@ -1057,8 +1064,7 @@ app.post("/api/games/:id/box", async (req, res) => {
       speciesId: data.speciesId,
       abilityId: disableAbilities ? null : data.abilityId ?? null,
       itemId: disableHeldItems ? null : data.itemId ?? null,
-      nickname: data.nickname ?? null,
-      notes: data.notes ?? null
+      nickname: data.nickname ?? null
     })
     .returning();
 
@@ -1081,8 +1087,7 @@ app.put("/api/games/:id/box/:boxId", async (req, res) => {
       speciesId: data.speciesId,
       abilityId: disableAbilities ? null : data.abilityId ?? null,
       itemId: disableHeldItems ? null : data.itemId ?? null,
-      nickname: data.nickname ?? null,
-      notes: data.notes ?? null
+      nickname: data.nickname ?? null
     })
     .where(eq(boxPokemon.id, boxId))
     .returning();
@@ -1131,6 +1136,127 @@ app.delete("/api/games/:id/box", async (req, res) => {
   await db.update(teamSlots).set({ boxPokemonId: null }).where(eq(teamSlots.gameId, gameId));
   await db.delete(boxPokemon).where(eq(boxPokemon.gameId, gameId));
   res.json({ ok: true });
+});
+
+app.get("/api/games/:id/tracked", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const game = await db.select().from(games).where(eq(games.id, gameId)).limit(1);
+  if (game.length === 0) return res.status(404).json({ error: "Game not found" });
+  const packId = game[0].packId;
+  const disableAbilities = !!game[0].disableAbilities;
+  const disableHeldItems = !!game[0].disableHeldItems;
+
+  const { typeNameById } = await getPackTypesMap(packId);
+
+  const rows = await db
+    .select({
+      id: trackedBox.id,
+      gameId: trackedBox.gameId,
+      speciesId: trackedBox.speciesId,
+      abilityId: trackedBox.abilityId,
+      itemId: trackedBox.itemId,
+      nickname: trackedBox.nickname,
+      speciesName: packSpecies.name,
+      type1Id: packSpecies.type1Id,
+      type2Id: packSpecies.type2Id,
+      oType1Id: gameSpeciesOverrides.type1Id,
+      oType2Id: gameSpeciesOverrides.type2Id,
+      abilityName: packAbilities.name,
+      itemName: packItems.name
+    })
+    .from(trackedBox)
+    .innerJoin(packSpecies, eq(trackedBox.speciesId, packSpecies.id))
+    .leftJoin(
+      gameSpeciesOverrides,
+      and(eq(gameSpeciesOverrides.gameId, gameId), eq(gameSpeciesOverrides.speciesId, packSpecies.id))
+    )
+    .leftJoin(packAbilities, eq(trackedBox.abilityId, packAbilities.id))
+    .leftJoin(packItems, eq(trackedBox.itemId, packItems.id))
+    .where(eq(trackedBox.gameId, gameId))
+    .orderBy(packSpecies.name);
+
+  const normalized = rows.map((row) => {
+    const effective = applySpeciesOverride(row, {
+      type1Id: row.oType1Id,
+      type2Id: row.oType2Id
+    });
+    return {
+      ...row,
+      abilityId: disableAbilities ? null : row.abilityId,
+      abilityName: disableAbilities ? null : row.abilityName,
+      itemId: disableHeldItems ? null : row.itemId,
+      itemName: disableHeldItems ? null : row.itemName,
+      type1Id: effective.type1Id,
+      type2Id: effective.type2Id,
+      type1Name: typeNameById.get(effective.type1Id) ?? null,
+      type2Name: effective.type2Id ? typeNameById.get(effective.type2Id) ?? null : null
+    };
+  });
+
+  res.json(normalized);
+});
+
+app.post("/api/games/:id/tracked", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const data = boxSchema.parse(req.body);
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  const disableAbilities = !!game.disableAbilities;
+  const disableHeldItems = !!game.disableHeldItems;
+
+  const [row] = await db
+    .insert(trackedBox)
+    .values({
+      gameId,
+      speciesId: data.speciesId,
+      abilityId: disableAbilities ? null : data.abilityId ?? null,
+      itemId: disableHeldItems ? null : data.itemId ?? null,
+      nickname: data.nickname ?? null
+    })
+    .returning();
+
+  res.json(row);
+});
+
+app.delete("/api/games/:id/tracked/:trackId", async (req, res) => {
+  const trackId = idSchema.parse(req.params.trackId);
+  await db.delete(trackedBox).where(eq(trackedBox.id, trackId));
+  res.json({ ok: true });
+});
+
+app.delete("/api/games/:id/tracked", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  await db.delete(trackedBox).where(eq(trackedBox.gameId, gameId));
+  res.json({ ok: true });
+});
+
+app.post("/api/games/:id/tracked/:trackId/send", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  const trackId = idSchema.parse(req.params.trackId);
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game) return res.status(404).json({ error: "Game not found" });
+  const disableAbilities = !!game.disableAbilities;
+  const disableHeldItems = !!game.disableHeldItems;
+
+  const [tracked] = await db
+    .select()
+    .from(trackedBox)
+    .where(and(eq(trackedBox.id, trackId), eq(trackedBox.gameId, gameId)));
+  if (!tracked) return res.status(404).json({ error: "Tracked entry not found" });
+
+  const [row] = await db
+    .insert(boxPokemon)
+    .values({
+      gameId,
+      speciesId: tracked.speciesId,
+      abilityId: disableAbilities ? null : tracked.abilityId ?? null,
+      itemId: disableHeldItems ? null : tracked.itemId ?? null,
+      nickname: tracked.nickname ?? null
+    })
+    .returning();
+
+  await db.delete(trackedBox).where(eq(trackedBox.id, trackId));
+  res.json(row);
 });
 
 async function ensureTeamSlots(gameId: number) {

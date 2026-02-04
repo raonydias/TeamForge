@@ -11,7 +11,8 @@ import {
   PackSpeciesAbilityRow,
   PackSpeciesEvolutionRow,
   PackSpeciesRow,
-  PackTypeRow
+  PackTypeRow,
+  TrackedRow
 } from "../lib/types";
 import { Button, Card, CardHeader, Input, Select, Modal, GhostButton, TypePill } from "../components/ui";
 import { DataTable } from "../components/DataTable";
@@ -56,6 +57,7 @@ export default function GameBox() {
   const [typeId, setTypeId] = useState("");
   const [minOverall, setMinOverall] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmClearTrackedOpen, setConfirmClearTrackedOpen] = useState(false);
   const [evolveOpen, setEvolveOpen] = useState(false);
   const [evolveTargets, setEvolveTargets] = useState<PackSpeciesEvolutionRow[]>([]);
   const [evolveBoxId, setEvolveBoxId] = useState<number | null>(null);
@@ -77,6 +79,10 @@ export default function GameBox() {
   const { data: box = [] } = useQuery<BoxRow[]>({
     queryKey: ["games", gameId, "box"],
     queryFn: () => api.get(`/games/${gameId}/box`)
+  });
+  const { data: tracked = [] } = useQuery<TrackedRow[]>({
+    queryKey: ["games", gameId, "tracked"],
+    queryFn: () => api.get(`/games/${gameId}/tracked`)
   });
   const { data: team } = useQuery<{
     slots: { id: number; slotIndex: number; boxPokemonId: number | null }[];
@@ -140,8 +146,7 @@ export default function GameBox() {
     speciesId: allowedSpeciesList[0]?.id ?? 0,
     abilityId: "",
     itemId: "",
-    nickname: "",
-    notes: ""
+    nickname: ""
   });
 
   useEffect(() => {
@@ -166,7 +171,10 @@ export default function GameBox() {
 
   const create = useMutation({
     mutationFn: (payload: any) => api.post(`/games/${gameId}/box`, payload),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] });
+      setForm((prev) => ({ ...prev, nickname: "" }));
+    }
   });
 
   const update = useMutation({
@@ -179,6 +187,27 @@ export default function GameBox() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
   });
 
+  const track = useMutation({
+    mutationFn: (payload: any) => api.post(`/games/${gameId}/tracked`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["games", gameId, "tracked"] });
+      setForm((prev) => ({ ...prev, nickname: "" }));
+    }
+  });
+
+  const sendTracked = useMutation({
+    mutationFn: (trackId: number) => api.post(`/games/${gameId}/tracked/${trackId}/send`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["games", gameId, "tracked"] });
+      queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] });
+    }
+  });
+
+  const removeTracked = useMutation({
+    mutationFn: (trackId: number) => api.del(`/games/${gameId}/tracked/${trackId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "tracked"] })
+  });
+
   const evolve = useMutation({
     mutationFn: (payload: { id: number; toSpeciesId: number }) =>
       api.put(`/games/${gameId}/box/${payload.id}/evolve`, { toSpeciesId: payload.toSpeciesId }),
@@ -188,6 +217,11 @@ export default function GameBox() {
   const clearBox = useMutation({
     mutationFn: () => api.del(`/games/${gameId}/box`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
+  });
+
+  const clearTracked = useMutation({
+    mutationFn: () => api.del(`/games/${gameId}/tracked`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "tracked"] })
   });
 
   const saveTeam = useMutation({
@@ -486,8 +520,7 @@ export default function GameBox() {
                       speciesId: row.original.speciesId,
                       abilityId: abilityIdValue,
                       itemId: game?.disableHeldItems ? null : editItemId ? Number(editItemId) : null,
-                      nickname: row.original.nickname,
-                      notes: row.original.notes
+                      nickname: row.original.nickname
                     }
                   });
                   setEditingId(null);
@@ -521,6 +554,69 @@ export default function GameBox() {
       )
     }
   ].filter(Boolean) as ColumnDef<BoxRow>[];
+
+  const trackedColumns: ColumnDef<TrackedRow>[] = [
+    {
+      id: "pokemon",
+      header: "Pokemon",
+      accessorFn: (row) => row.nickname || row.speciesName,
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{row.original.nickname || row.original.speciesName}</div>
+          <div className="text-xs text-slate-400">{row.original.speciesName}</div>
+        </div>
+      )
+    },
+    {
+      id: "types",
+      header: "Types",
+      accessorFn: (row) => [row.type1Name, row.type2Name].filter(Boolean).join(" / "),
+      cell: ({ row }) => {
+        const entries = [
+          { id: row.original.type1Id, name: row.original.type1Name },
+          { id: row.original.type2Id, name: row.original.type2Name }
+        ].filter((entry) => entry.name) as { id: number; name: string }[];
+        return (
+          <div className="flex flex-wrap gap-2">
+            {entries.map((entry) => (
+              <TypePill key={`${row.original.id}-${entry.id}`} name={entry.name} color={typeColorById.get(entry.id) ?? null} />
+            ))}
+          </div>
+        );
+      }
+    },
+    showAbilities
+      ? {
+          id: "ability",
+          header: "Ability",
+          accessorKey: "abilityName",
+          cell: ({ row }) => row.original.abilityName ?? "-"
+        }
+      : null,
+    showItems
+      ? {
+          id: "item",
+          header: "Item",
+          accessorKey: "itemName",
+          cell: ({ row }) => row.original.itemName ?? "-"
+        }
+      : null,
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex gap-2 justify-end">
+          <Button onClick={() => sendTracked.mutate(row.original.id)} type="button">
+            Send to Box
+          </Button>
+          <Button onClick={() => removeTracked.mutate(row.original.id)} type="button">
+            Remove
+          </Button>
+        </div>
+      )
+    }
+  ].filter(Boolean) as ColumnDef<TrackedRow>[];
 
   const filteredBox = box.filter((row) => {
     const matchesSearch = search
@@ -583,7 +679,6 @@ export default function GameBox() {
             value={form.nickname}
             onChange={(e) => setForm((f) => ({ ...f, nickname: e.target.value }))}
           />
-          <Input placeholder="Notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
         </div>
         <div className="mt-3">
           <div className="flex gap-2">
@@ -593,12 +688,23 @@ export default function GameBox() {
                   speciesId: Number(form.speciesId),
                   abilityId: form.abilityId ? Number(form.abilityId) : null,
                   itemId: form.itemId ? Number(form.itemId) : null,
-                  nickname: form.nickname,
-                  notes: form.notes
+                  nickname: form.nickname
                 })
               }
             >
               Add to Box
+            </Button>
+            <Button
+              onClick={() =>
+                track.mutate({
+                  speciesId: Number(form.speciesId),
+                  abilityId: form.abilityId ? Number(form.abilityId) : null,
+                  itemId: form.itemId ? Number(form.itemId) : null,
+                  nickname: form.nickname
+                })
+              }
+            >
+              Track
             </Button>
             <Link to={`/games/${gameId}/team`} className="inline-flex">
               <GhostButton type="button">Go to Team</GhostButton>
@@ -606,6 +712,25 @@ export default function GameBox() {
           </div>
         </div>
       </Card>
+
+      {tracked.length > 0 ? (
+        <Card>
+          <div className="flex items-start justify-between gap-3">
+            <CardHeader title="Wild List" subtitle="Tracked targets not yet in the box." />
+            <div className="mt-4 mr-4 flex items-center gap-2">
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                {tracked.length}
+              </span>
+              <GhostButton type="button" onClick={() => setConfirmClearTrackedOpen(true)}>
+                Clear Wild List
+              </GhostButton>
+            </div>
+          </div>
+          <div className="overflow-auto">
+            <DataTable data={tracked} columns={trackedColumns} />
+          </div>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader title="Box" subtitle="Computed potentials are shown per entry." />
@@ -646,6 +771,27 @@ export default function GameBox() {
             Clear Box
           </Button>
           <GhostButton onClick={() => setConfirmOpen(false)} type="button">
+            Cancel
+          </GhostButton>
+        </div>
+      </Modal>
+      <Modal
+        title="Clear Wild List?"
+        isOpen={confirmClearTrackedOpen}
+        onClose={() => setConfirmClearTrackedOpen(false)}
+      >
+        <div className="text-sm text-slate-600">This will remove all tracked entries for this game.</div>
+        <div className="mt-4 flex gap-2">
+          <Button
+            onClick={() => {
+              clearTracked.mutate();
+              setConfirmClearTrackedOpen(false);
+            }}
+            type="button"
+          >
+            Clear Wild List
+          </Button>
+          <GhostButton onClick={() => setConfirmClearTrackedOpen(false)} type="button">
             Cancel
           </GhostButton>
         </div>

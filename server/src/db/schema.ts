@@ -207,8 +207,19 @@ export const boxPokemon = sqliteTable(
     speciesId: integer("species_id").notNull().references(() => packSpecies.id),
     abilityId: integer("ability_id").references(() => packAbilities.id),
     itemId: integer("item_id").references(() => packItems.id),
-    nickname: text("nickname"),
-    notes: text("notes")
+    nickname: text("nickname")
+  }
+);
+
+export const trackedBox = sqliteTable(
+  "tracked_box",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    gameId: integer("game_id").notNull().references(() => games.id),
+    speciesId: integer("species_id").notNull().references(() => packSpecies.id),
+    abilityId: integer("ability_id").references(() => packAbilities.id),
+    itemId: integer("item_id").references(() => packItems.id),
+    nickname: text("nickname")
   }
 );
 
