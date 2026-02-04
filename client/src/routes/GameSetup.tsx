@@ -9,16 +9,28 @@ function ToggleList({
   title,
   items,
   selected,
-  onToggle
+  onToggle,
+  onSelectAll,
+  onClear
 }: {
   title: string;
   items: { id: number; name: string }[];
   selected: Set<number>;
   onToggle: (id: number) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
 }) {
   return (
     <Card>
       <CardHeader title={title} subtitle="Toggle to include in this game." />
+      <div className="flex gap-2 mb-3">
+        <Button onClick={onSelectAll} type="button">
+          Select All
+        </Button>
+        <Button onClick={onClear} type="button">
+          Clear
+        </Button>
+      </div>
       <div className="space-y-2 max-h-[420px] overflow-auto">
         {items.map((item) => (
           <label key={item.id} className="flex items-center gap-2 text-sm">
@@ -77,14 +89,35 @@ export default function GameSetup() {
   const [itemsSet, setItemsSet] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    if (allowedSpecies) setSpeciesSet(new Set(allowedSpecies));
-  }, [allowedSpecies]);
+    if (!allowedSpecies) return;
+    if (allowedSpecies.length > 0) {
+      setSpeciesSet(new Set(allowedSpecies));
+      return;
+    }
+    if (species.length > 0) {
+      setSpeciesSet(new Set(species.map((s) => s.id)));
+    }
+  }, [allowedSpecies, species]);
   useEffect(() => {
-    if (allowedAbilities) setAbilitiesSet(new Set(allowedAbilities));
-  }, [allowedAbilities]);
+    if (!allowedAbilities) return;
+    if (allowedAbilities.length > 0) {
+      setAbilitiesSet(new Set(allowedAbilities));
+      return;
+    }
+    if (abilities.length > 0) {
+      setAbilitiesSet(new Set(abilities.map((a) => a.id)));
+    }
+  }, [allowedAbilities, abilities]);
   useEffect(() => {
-    if (allowedItems) setItemsSet(new Set(allowedItems));
-  }, [allowedItems]);
+    if (!allowedItems) return;
+    if (allowedItems.length > 0) {
+      setItemsSet(new Set(allowedItems));
+      return;
+    }
+    if (items.length > 0) {
+      setItemsSet(new Set(items.map((i) => i.id)));
+    }
+  }, [allowedItems, items]);
 
   const updateAllowed = useMutation({
     mutationFn: async () => {
@@ -116,6 +149,8 @@ export default function GameSetup() {
             next.has(idValue) ? next.delete(idValue) : next.add(idValue);
             setSpeciesSet(next);
           }}
+          onSelectAll={() => setSpeciesSet(new Set(species.map((s) => s.id)))}
+          onClear={() => setSpeciesSet(new Set())}
         />
         <ToggleList
           title="Allowed Abilities"
@@ -126,6 +161,8 @@ export default function GameSetup() {
             next.has(idValue) ? next.delete(idValue) : next.add(idValue);
             setAbilitiesSet(next);
           }}
+          onSelectAll={() => setAbilitiesSet(new Set(abilities.map((a) => a.id)))}
+          onClear={() => setAbilitiesSet(new Set())}
         />
         <ToggleList
           title="Allowed Items"
@@ -136,6 +173,8 @@ export default function GameSetup() {
             next.has(idValue) ? next.delete(idValue) : next.add(idValue);
             setItemsSet(next);
           }}
+          onSelectAll={() => setItemsSet(new Set(items.map((i) => i.id)))}
+          onClear={() => setItemsSet(new Set())}
         />
       </div>
     </div>

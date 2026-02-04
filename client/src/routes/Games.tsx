@@ -53,15 +53,6 @@ export default function Games() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
-  const [editPackId, setEditPackId] = useState<number>(packs[0]?.id ?? 0);
-
-  useEffect(() => {
-    if (!editingId) return;
-    if (packs.length > 0 && !packs.some((p) => p.id === editPackId)) {
-      setEditPackId(packs[0].id);
-    }
-  }, [packs, editPackId, editingId]);
-
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
@@ -88,19 +79,12 @@ export default function Games() {
                 <>
                   <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
                   <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Notes / rules" />
-                  <Select value={editPackId} onChange={(e) => setEditPackId(Number(e.target.value))}>
-                    {packs.map((pack) => (
-                      <option key={pack.id} value={pack.id}>
-                        {pack.name}
-                      </option>
-                    ))}
-                  </Select>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
                         update.mutate({
                           id: game.id,
-                          data: { name: editName.trim(), notes: editNotes.trim() || null, packId: editPackId }
+                          data: { name: editName.trim(), notes: editNotes.trim() || null, packId: game.packId }
                         });
                         setEditingId(null);
                       }}
@@ -116,6 +100,9 @@ export default function Games() {
               ) : (
                 <>
                   <div className="font-semibold text-lg">{game.name}</div>
+                  <div className="text-xs text-slate-500">
+                    Pack: {packs.find((p) => p.id === game.packId)?.name ?? "Unknown"}
+                  </div>
                   {game.notes ? <div className="text-sm text-slate-500">{game.notes}</div> : null}
                   <div className="flex gap-3 text-sm">
                     <Link className="text-accent" to={`/games/${game.id}/setup`}>
@@ -137,7 +124,6 @@ export default function Games() {
                         setEditingId(game.id);
                         setEditName(game.name);
                         setEditNotes(game.notes ?? "");
-                        setEditPackId(game.packId);
                       }}
                       type="button"
                     >

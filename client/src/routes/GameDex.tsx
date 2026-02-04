@@ -52,17 +52,34 @@ export default function GameDex() {
   });
 
   const columns: ColumnDef<PackSpeciesRow>[] = [
-    { header: "Name", accessorKey: "name", cell: (info) => <span className="font-medium">{info.getValue<string>()}</span> },
     {
+      id: "name",
+      header: "Name",
+      accessorKey: "name",
+      cell: (info) => <span className="font-medium">{info.getValue<string>()}</span>
+    },
+    {
+      id: "types",
       header: "Types",
       cell: ({ row }) => [row.original.type1Name, row.original.type2Name].filter(Boolean).join(" / ")
     },
-    { header: "HP", accessorKey: "hp" },
-    { header: "Atk", accessorKey: "atk" },
-    { header: "Def", accessorKey: "def" },
-    { header: "SpA", accessorKey: "spa" },
-    { header: "SpD", accessorKey: "spd" },
-    { header: "Spe", accessorKey: "spe" }
+    { id: "hp", header: "HP", accessorKey: "hp" },
+    { id: "atk", header: "Atk", accessorKey: "atk" },
+    { id: "def", header: "Def", accessorKey: "def" },
+    { id: "spa", header: "SpA", accessorKey: "spa" },
+    { id: "spd", header: "SpD", accessorKey: "spd" },
+    { id: "spe", header: "Spe", accessorKey: "spe" },
+    {
+      id: "bst",
+      header: "BST",
+      cell: ({ row }) =>
+        row.original.hp +
+        row.original.atk +
+        row.original.def +
+        row.original.spa +
+        row.original.spd +
+        row.original.spe
+    }
   ];
 
   return (

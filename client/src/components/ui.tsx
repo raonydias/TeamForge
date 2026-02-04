@@ -53,10 +53,17 @@ export function GhostButton({
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   (props, ref) => {
+    const { onFocus, ...rest } = props;
     return (
       <input
-        {...props}
+        {...rest}
         ref={ref}
+        onFocus={(event) => {
+          onFocus?.(event);
+          if (event.currentTarget.select) {
+            event.currentTarget.select();
+          }
+        }}
         className={`w-full rounded-xl border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent ${
           props.className ?? ""
         }`}

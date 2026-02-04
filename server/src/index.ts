@@ -531,10 +531,15 @@ app.get("/api/packs/:id/species-abilities", async (req, res) => {
 app.post("/api/packs/:id/species-abilities", async (req, res) => {
   const packId = idSchema.parse(req.params.id);
   const data = speciesAbilitiesSchema.parse(req.body);
-  await db.delete(packSpeciesAbilities).where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.speciesId, data.speciesId)));
-  if (data.slots.length > 0) {
+  const cleanSlots = data.slots
+    .filter((slot) => Number.isFinite(slot.abilityId) && slot.abilityId > 0)
+    .map((slot) => ({ ...slot, abilityId: Number(slot.abilityId) }));
+  await db
+    .delete(packSpeciesAbilities)
+    .where(and(eq(packSpeciesAbilities.packId, packId), eq(packSpeciesAbilities.speciesId, data.speciesId)));
+  if (cleanSlots.length > 0) {
     await db.insert(packSpeciesAbilities).values(
-      data.slots.map((slot) => ({
+      cleanSlots.map((slot) => ({
         packId,
         speciesId: data.speciesId,
         abilityId: slot.abilityId,
@@ -559,7 +564,27 @@ app.get("/api/games/:id", async (req, res) => {
 
 app.post("/api/games", async (req, res) => {
   const data = gameSchema.parse(req.body);
-  const [row] = await db.insert(games).values({ name: data.name, notes: data.notes ?? null, packId: data.packId }).returning();
+  const [row] = await db
+    .insert(games)
+    .values({ name: data.name, notes: data.notes ?? null, packId: data.packId })
+    .returning();
+
+  const packSpeciesRows = await db.select({ id: packSpecies.id }).from(packSpecies).where(eq(packSpecies.packId, data.packId));
+  const packAbilitiesRows = await db
+    .select({ id: packAbilities.id })
+    .from(packAbilities)
+    .where(eq(packAbilities.packId, data.packId));
+  const packItemsRows = await db.select({ id: packItems.id }).from(packItems).where(eq(packItems.packId, data.packId));
+
+  if (packSpeciesRows.length > 0) {
+    await db.insert(gameSpecies).values(packSpeciesRows.map((s) => ({ gameId: row.id, speciesId: s.id })));
+  }
+  if (packAbilitiesRows.length > 0) {
+    await db.insert(gameAbilities).values(packAbilitiesRows.map((a) => ({ gameId: row.id, abilityId: a.id })));
+  }
+  if (packItemsRows.length > 0) {
+    await db.insert(gameItems).values(packItemsRows.map((i) => ({ gameId: row.id, itemId: i.id })));
+  }
   res.json(row);
 });
 
@@ -576,6 +601,13 @@ app.put("/api/games/:id", async (req, res) => {
 
 app.delete("/api/games/:id", async (req, res) => {
   const id = idSchema.parse(req.params.id);
+  await db.delete(teamSlots).where(eq(teamSlots.gameId, id));
+  await db.delete(boxPokemon).where(eq(boxPokemon.gameId, id));
+  await db.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.gameId, id));
+  await db.delete(gameSpeciesOverrides).where(eq(gameSpeciesOverrides.gameId, id));
+  await db.delete(gameSpecies).where(eq(gameSpecies.gameId, id));
+  await db.delete(gameAbilities).where(eq(gameAbilities.gameId, id));
+  await db.delete(gameItems).where(eq(gameItems.gameId, id));
   await db.delete(games).where(eq(games.id, id));
   res.json({ ok: true });
 });
@@ -845,7 +877,15 @@ app.put("/api/games/:id/box/:boxId", async (req, res) => {
 
 app.delete("/api/games/:id/box/:boxId", async (req, res) => {
   const boxId = idSchema.parse(req.params.boxId);
+  await db.update(teamSlots).set({ boxPokemonId: null }).where(eq(teamSlots.boxPokemonId, boxId));
   await db.delete(boxPokemon).where(eq(boxPokemon.id, boxId));
+  res.json({ ok: true });
+});
+
+app.delete("/api/games/:id/box", async (req, res) => {
+  const gameId = idSchema.parse(req.params.id);
+  await db.update(teamSlots).set({ boxPokemonId: null }).where(eq(teamSlots.gameId, gameId));
+  await db.delete(boxPokemon).where(eq(boxPokemon.gameId, gameId));
   res.json({ ok: true });
 });
 

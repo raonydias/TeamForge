@@ -84,8 +84,19 @@ export default function GameBox() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
   });
 
+  const remove = useMutation({
+    mutationFn: (idValue: number) => api.del(`/games/${gameId}/box/${idValue}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
+  });
+
+  const clearBox = useMutation({
+    mutationFn: () => api.del(`/games/${gameId}/box`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games", gameId, "box"] })
+  });
+
   const columns: ColumnDef<BoxRow>[] = [
     {
+      id: "pokemon",
       header: "Pokemon",
       cell: ({ row }) => (
         <div>
@@ -94,27 +105,56 @@ export default function GameBox() {
         </div>
       )
     },
-    { header: "Ability", accessorKey: "abilityName", cell: (info) => info.getValue<string>() ?? "-" },
-    { header: "Item", accessorKey: "itemName", cell: (info) => info.getValue<string>() ?? "-" },
     {
+      id: "types",
+      header: "Types",
+      cell: ({ row }) => [row.original.type1Name, row.original.type2Name].filter(Boolean).join(" / ")
+    },
+    {
+      id: "ability",
+      header: "Ability",
+      accessorKey: "abilityName",
+      cell: (info) => info.getValue<string>() ?? "-"
+    },
+    {
+      id: "item",
+      header: "Item",
+      accessorKey: "itemName",
+      cell: (info) => info.getValue<string>() ?? "-"
+    },
+    {
+      id: "offP",
       header: "Off P",
       cell: ({ row }) => row.original.potentials.offensivePhysical.toFixed(1)
     },
     {
+      id: "offS",
       header: "Off S",
       cell: ({ row }) => row.original.potentials.offensiveSpecial.toFixed(1)
     },
     {
+      id: "defP",
       header: "Def P",
       cell: ({ row }) => row.original.potentials.defensivePhysical.toFixed(1)
     },
     {
+      id: "defS",
       header: "Def S",
       cell: ({ row }) => row.original.potentials.defensiveSpecial.toFixed(1)
     },
     {
+      id: "overall",
       header: "Overall",
       cell: ({ row }) => <span className="font-semibold text-ink">{row.original.potentials.overall.toFixed(1)}</span>
+    },
+    {
+      id: "remove",
+      header: "",
+      cell: ({ row }) => (
+        <Button onClick={() => remove.mutate(row.original.id)} type="button">
+          Remove
+        </Button>
+      )
     }
   ];
 
@@ -195,6 +235,16 @@ export default function GameBox() {
             ))}
           </Select>
           <Input placeholder="Min Overall" value={minOverall} onChange={(e) => setMinOverall(e.target.value)} />
+          <Button
+            onClick={() => {
+              if (window.confirm("Clear all box entries for this game?")) {
+                clearBox.mutate();
+              }
+            }}
+            type="button"
+          >
+            Clear Box
+          </Button>
         </div>
         <div className="overflow-auto">
           <DataTable data={filteredBox} columns={columns} />

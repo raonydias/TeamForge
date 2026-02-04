@@ -103,9 +103,17 @@ export default function PackSpecies() {
     mutationFn: async () => {
       if (!selectedSpeciesId) return;
       const slots = [] as { abilityId: number; slot: "1" | "2" | "H" }[];
-      if (slot1) slots.push({ abilityId: Number(slot1), slot: "1" });
-      if (slot2) slots.push({ abilityId: Number(slot2), slot: "2" });
-      hiddenSlots.forEach((idValue) => slots.push({ abilityId: idValue, slot: "H" }));
+      if (slot1) {
+        const idValue = Number(slot1);
+        if (Number.isFinite(idValue)) slots.push({ abilityId: idValue, slot: "1" });
+      }
+      if (slot2) {
+        const idValue = Number(slot2);
+        if (Number.isFinite(idValue)) slots.push({ abilityId: idValue, slot: "2" });
+      }
+      hiddenSlots
+        .filter((idValue) => Number.isFinite(idValue))
+        .forEach((idValue) => slots.push({ abilityId: idValue, slot: "H" }));
       await api.post(`/packs/${packId}/species-abilities`, {
         speciesId: Number(selectedSpeciesId),
         slots
