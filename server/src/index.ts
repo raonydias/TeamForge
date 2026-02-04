@@ -950,7 +950,9 @@ app.get("/api/games/:id/box", async (req, res) => {
   const pack = await getPackById(packId);
   const useSingleSpecial = pack?.useSingleSpecial ?? false;
 
-  const { typeNameById } = await getPackTypesMap(packId);
+  const { typesList, typeNameById } = await getPackTypesMap(packId);
+  const chartRows = await db.select().from(packTypeEffectiveness).where(eq(packTypeEffectiveness.packId, packId));
+  const scoringTypes = typesList.filter((t) => !t.excludeInChart);
 
   const rows = await db
     .select({
@@ -1011,7 +1013,7 @@ app.get("/api/games/:id/box", async (req, res) => {
         ...(disableHeldItems ? [] : parseTags(row.itemTags))
       ];
       const effectiveSpd = useSingleSpecial ? effective.spa : effective.spd;
-      const potentials = await computePotentials(
+      const potentials = computePotentials(
         {
           hp: effective.hp,
           atk: effective.atk,
@@ -1020,7 +1022,15 @@ app.get("/api/games/:id/box", async (req, res) => {
           spd: effectiveSpd,
           spe: effective.spe
         },
-        tags
+        tags,
+        effective.type1Id,
+        effective.type2Id ?? null,
+        scoringTypes.map((t) => ({ id: t.id, name: t.name, color: t.color ?? null })),
+        chartRows.map((r) => ({
+          attackingTypeId: r.attackingTypeId,
+          defendingTypeId: r.defendingTypeId,
+          multiplier: r.multiplier
+        }))
       );
 
       return {

@@ -454,28 +454,33 @@ export default function GameBox() {
       : null,
     {
       id: "offP",
-      header: "Off P",
-      cell: ({ row }) => row.original.potentials.offensivePhysical.toFixed(1)
+      header: "Physical Attacker",
+      accessorFn: (row) => row.potentials.offensivePhysical,
+      cell: ({ row }) => row.original.potentials.offensivePhysical.toFixed(2)
     },
     {
       id: "offS",
-      header: "Off S",
-      cell: ({ row }) => row.original.potentials.offensiveSpecial.toFixed(1)
+      header: "Special Attacker",
+      accessorFn: (row) => row.potentials.offensiveSpecial,
+      cell: ({ row }) => row.original.potentials.offensiveSpecial.toFixed(2)
     },
     {
       id: "defP",
-      header: "Def P",
-      cell: ({ row }) => row.original.potentials.defensivePhysical.toFixed(1)
+      header: "Physical Tank",
+      accessorFn: (row) => row.potentials.defensivePhysical,
+      cell: ({ row }) => row.original.potentials.defensivePhysical.toFixed(2)
     },
     {
       id: "defS",
-      header: "Def S",
-      cell: ({ row }) => row.original.potentials.defensiveSpecial.toFixed(1)
+      header: "Special Tank",
+      accessorFn: (row) => row.potentials.defensiveSpecial,
+      cell: ({ row }) => row.original.potentials.defensiveSpecial.toFixed(2)
     },
     {
-      id: "overall",
-      header: "Overall",
-      cell: ({ row }) => <span className="font-semibold text-ink">{row.original.potentials.overall.toFixed(1)}</span>
+      id: "rank",
+      header: "Box Rank",
+      accessorFn: (row) => row.potentials.boxRank,
+      cell: ({ row }) => <span className="font-semibold text-ink">{row.original.potentials.boxRank.toFixed(2)}</span>
     },
     {
       id: "remove",
@@ -623,9 +628,14 @@ export default function GameBox() {
       ? row.speciesName.toLowerCase().includes(search.toLowerCase()) || (row.nickname ?? "").toLowerCase().includes(search.toLowerCase())
       : true;
     const matchesType = typeId ? row.type1Id === Number(typeId) || row.type2Id === Number(typeId) : true;
-    const matchesOverall = minOverall ? row.potentials.overall >= Number(minOverall) : true;
+    const matchesOverall = minOverall ? row.potentials.boxRank >= Number(minOverall) : true;
     return matchesSearch && matchesType && matchesOverall;
   });
+
+  const balanceWarnings = box
+    .filter((row) => row.potentials.balanceInvalid)
+    .map((row) => (row.nickname ? `${row.nickname} (${row.speciesName})` : row.speciesName));
+  const uniqueWarnings = Array.from(new Set(balanceWarnings));
 
   return (
     <div className="space-y-6">
@@ -744,7 +754,7 @@ export default function GameBox() {
               </option>
             ))}
           </Select>
-          <Input placeholder="Min Overall" value={minOverall} onChange={(e) => setMinOverall(e.target.value)} />
+          <Input placeholder="Min Rank" value={minOverall} onChange={(e) => setMinOverall(e.target.value)} />
           <Button
             onClick={() => {
               setConfirmOpen(true);
@@ -757,6 +767,12 @@ export default function GameBox() {
         <div className="overflow-auto">
           <DataTable data={filteredBox} columns={columns} />
         </div>
+        {uniqueWarnings.length > 0 ? (
+          <div className="mt-3 text-sm text-amber-700">
+            Warning: Box Rank could not be balanced for{" "}
+            <span className="font-semibold">{uniqueWarnings.join(", ")}</span>.
+          </div>
+        ) : null}
       </Card>
       <Modal title="Clear Box?" isOpen={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <div className="text-sm text-slate-600">This will remove all box entries for this game.</div>

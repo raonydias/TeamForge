@@ -102,7 +102,10 @@ export type BoxRow = {
     offensiveSpecial: number;
     defensivePhysical: number;
     defensiveSpecial: number;
-    overall: number;
+    offense: number;
+    defense: number;
+    boxRank: number;
+    balanceInvalid: boolean;
   };
 };
 

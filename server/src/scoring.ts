@@ -1,6 +1,3 @@
-import { db } from "./db/index.js";
-import { settings } from "./db/schema.js";
-
 export type BaseStats = {
   hp: number;
   atk: number;
@@ -15,7 +12,10 @@ export type Potentials = {
   offensiveSpecial: number;
   defensivePhysical: number;
   defensiveSpecial: number;
-  overall: number;
+  offense: number;
+  defense: number;
+  boxRank: number;
+  balanceInvalid: boolean;
 };
 
 export type TypeChartRow = {
@@ -36,27 +36,12 @@ export type TeamMember = {
   tags: string[];
 };
 
-const defaultWeights = {
-  attack: 0.9,
-  spa: 0.9,
-  speed: 1.2,
-  hp: 1.0,
-  def: 1.0,
-  spd: 1.0
+const scoringDefaults = {
+  speedWeight: 0.6,
+  stabPower: 1.5,
+  typeDefExponent: 0.65,
+  stabExponent: 0.6
 };
-
-export async function loadWeights() {
-  const rows = await db.select().from(settings);
-  const map = new Map(rows.map((r) => [r.key, Number(r.value)]));
-  return {
-    attack: map.get("weight.attack") ?? defaultWeights.attack,
-    spa: map.get("weight.spa") ?? defaultWeights.spa,
-    speed: map.get("weight.speed") ?? defaultWeights.speed,
-    hp: map.get("weight.hp") ?? defaultWeights.hp,
-    def: map.get("weight.def") ?? defaultWeights.def,
-    spd: map.get("weight.spd") ?? defaultWeights.spd
-  };
-}
 
 export function parseTags(raw: string | null | undefined) {
   if (!raw) return [] as string[];
@@ -105,23 +90,81 @@ function applyStatMultipliers(stats: BaseStats, tags: string[]) {
   };
 }
 
-export async function computePotentials(stats: BaseStats, tags: string[]): Promise<Potentials> {
-  const weights = await loadWeights();
+export function computePotentials(
+  stats: BaseStats,
+  tags: string[],
+  type1Id: number,
+  type2Id: number | null,
+  typesList: TypeInfo[],
+  chartRows: TypeChartRow[]
+): Potentials {
   const adjusted = applyStatMultipliers(stats, tags);
 
-  const offensivePhysical = adjusted.atk * weights.attack + adjusted.spe * weights.speed;
-  const offensiveSpecial = adjusted.spa * weights.spa + adjusted.spe * weights.speed;
-  const defensivePhysical = adjusted.hp * weights.hp + adjusted.def * weights.def;
-  const defensiveSpecial = adjusted.hp * weights.hp + adjusted.spd * weights.spd;
+  const chartMap = new Map<string, number>();
+  for (const row of chartRows) {
+    chartMap.set(`${row.attackingTypeId}-${row.defendingTypeId}`, row.multiplier);
+  }
 
-  const overall = (offensivePhysical + offensiveSpecial + defensivePhysical + defensiveSpecial) / 4;
+  const typesCount = typesList.length || 1;
+
+  let incomingSum = 0;
+  for (const atk of typesList) {
+    let mult = chartMap.get(`${atk.id}-${type1Id}`) ?? 1;
+    if (type2Id) {
+      mult *= chartMap.get(`${atk.id}-${type2Id}`) ?? 1;
+    }
+    mult *= tagMultiplierForType(tags, atk.name);
+    incomingSum += mult ** 2;
+  }
+  const avgIncoming = incomingSum / typesCount;
+  const safeIncoming = avgIncoming > 0 ? avgIncoming : 1e-6;
+  const typeDef = 1 / Math.sqrt(safeIncoming);
+  const typeDefAdj = Math.pow(typeDef, scoringDefaults.typeDefExponent);
+
+  const bulkPhys = Math.sqrt(adjusted.hp * adjusted.def);
+  const bulkSpec = Math.sqrt(adjusted.hp * adjusted.spd);
+
+  const speedWeight = scoringDefaults.speedWeight;
+  const baseOffPhys = (1 - speedWeight) * adjusted.atk + speedWeight * adjusted.spe;
+  const baseOffSpec = (1 - speedWeight) * adjusted.spa + speedWeight * adjusted.spe;
+
+  let stabSum = 0;
+  for (const def of typesList) {
+    const m1 = chartMap.get(`${type1Id}-${def.id}`) ?? 1;
+    let best = m1;
+    if (type2Id) {
+      const m2 = chartMap.get(`${type2Id}-${def.id}`) ?? 1;
+      best = Math.max(m1, m2);
+    }
+    stabSum += best ** scoringDefaults.stabPower;
+  }
+  const avgStab = stabSum / typesCount;
+  const stabCov = Math.pow(avgStab, 1 / scoringDefaults.stabPower);
+  const stabAdj = Math.pow(stabCov, scoringDefaults.stabExponent);
+
+  const offensivePhysical = baseOffPhys * stabAdj;
+  const offensiveSpecial = baseOffSpec * stabAdj;
+  const defensivePhysical = bulkPhys * typeDefAdj;
+  const defensiveSpecial = bulkSpec * typeDefAdj;
+
+  const off = 0.75 * Math.max(offensivePhysical, offensiveSpecial) + 0.25 * ((offensivePhysical + offensiveSpecial) / 2);
+  const def = 0.75 * Math.max(defensivePhysical, defensiveSpecial) + 0.25 * ((defensivePhysical + defensiveSpecial) / 2);
+
+  const boxRankRaw = 0.56 * off + 0.44 * def;
+  const maxSide = Math.max(off, def);
+  const balanceInvalid = maxSide === 0;
+  const balance = balanceInvalid ? 1 : Math.min(off, def) / maxSide;
+  const boxRank = boxRankRaw * (0.88 + 0.12 * balance);
 
   return {
     offensivePhysical,
     offensiveSpecial,
     defensivePhysical,
     defensiveSpecial,
-    overall
+    offense: off,
+    defense: def,
+    boxRank,
+    balanceInvalid
   };
 }
 
