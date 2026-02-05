@@ -5,6 +5,12 @@ export type PackRow = {
   useSingleSpecial: boolean;
 };
 
+export type PackImportRow = {
+  importPackId: number;
+  sortOrder: number;
+  name: string;
+};
+
 export type PackTypeRow = {
   id: number;
   packId: number;

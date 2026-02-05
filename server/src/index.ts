@@ -12,6 +12,7 @@ import {
   packSpecies,
   packAbilities,
   packItems,
+  packImports,
   packSpeciesAbilities,
   packSpeciesEvolutions,
   games,
@@ -51,7 +52,8 @@ const idSchema = z.coerce.number().int().positive();
 const packSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().nullable(),
-  useSingleSpecial: z.boolean().optional().nullable()
+  useSingleSpecial: z.boolean().optional().nullable(),
+  importPackIds: z.array(idSchema).optional().default([])
 });
 
 const typeSchema = z.object({
@@ -227,6 +229,28 @@ async function getPackById(packId: number) {
   return { ...row, useSingleSpecial: !!row.useSingleSpecial };
 }
 
+async function getPackImportChainAsync(packId: number, cache = new Map<number, number[]>(), visiting = new Set<number>()) {
+  if (cache.has(packId)) return cache.get(packId)!;
+  if (visiting.has(packId)) return [];
+  visiting.add(packId);
+  const rows = await db
+    .select()
+    .from(packImports)
+    .where(eq(packImports.packId, packId))
+    .orderBy(packImports.sortOrder);
+  const result: number[] = [];
+  for (const row of rows) {
+    const sub = await getPackImportChainAsync(row.importPackId, cache, visiting);
+    for (const id of sub) {
+      if (!result.includes(id)) result.push(id);
+    }
+    if (!result.includes(row.importPackId)) result.push(row.importPackId);
+  }
+  visiting.delete(packId);
+  cache.set(packId, result);
+  return result;
+}
+
 function applySpeciesOverride(base: any, override: any | null) {
   return {
     ...base,
@@ -245,6 +269,34 @@ function normalizeKey(value: string) {
   return value.trim().toLowerCase();
 }
 
+function buildPackImportChain(
+  tx: any,
+  packId: number,
+  cache: Map<number, number[]>,
+  visiting: Set<number>
+) {
+  if (cache.has(packId)) return cache.get(packId)!;
+  if (visiting.has(packId)) return [];
+  visiting.add(packId);
+  const rows = tx
+    .select()
+    .from(packImports)
+    .where(eq(packImports.packId, packId))
+    .orderBy(packImports.sortOrder)
+    .all();
+  const result: number[] = [];
+  for (const row of rows) {
+    const sub = buildPackImportChain(tx, row.importPackId, cache, visiting);
+    for (const id of sub) {
+      if (!result.includes(id)) result.push(id);
+    }
+    if (!result.includes(row.importPackId)) result.push(row.importPackId);
+  }
+  visiting.delete(packId);
+  cache.set(packId, result);
+  return result;
+}
+
 async function getGameUseSingleSpecial(gameId: number) {
   const rows = await db
     .select({ useSingleSpecial: packs.useSingleSpecial })
@@ -258,8 +310,24 @@ async function getGameUseSingleSpecial(gameId: number) {
 
 function buildGameData(tx: any, gameId: number, packIds: number[]) {
   const packTypesRows = tx.select().from(packTypes).where(inArray(packTypes.packId, packIds)).all();
-  const packAbilitiesRows = tx.select().from(packAbilities).where(inArray(packAbilities.packId, packIds)).all();
-  const packItemsRows = tx.select().from(packItems).where(inArray(packItems.packId, packIds)).all();
+
+  const importCache = new Map<number, number[]>();
+  const importChains = new Map<number, number[]>();
+  for (const packId of packIds) {
+    const chain = buildPackImportChain(tx, packId, importCache, new Set<number>());
+    importChains.set(packId, chain);
+  }
+
+  const abilitySourcePackIds = Array.from(
+    new Set(packIds.flatMap((packId) => [...(importChains.get(packId) ?? []), packId]))
+  );
+  const packAbilitiesRows = abilitySourcePackIds.length
+    ? tx.select().from(packAbilities).where(inArray(packAbilities.packId, abilitySourcePackIds)).all()
+    : [];
+
+  const packItemsRows = abilitySourcePackIds.length
+    ? tx.select().from(packItems).where(inArray(packItems.packId, abilitySourcePackIds)).all()
+    : [];
   const packSpeciesRows = tx.select().from(packSpecies).where(inArray(packSpecies.packId, packIds)).all();
   const packSpeciesAbilitiesRows = tx
     .select()
@@ -285,6 +353,7 @@ function buildGameData(tx: any, gameId: number, packIds: number[]) {
   const typeKeyByPackId = new Map<string, string>();
   const abilityKeyByPackId = new Map<string, string>();
   const itemKeyByPackId = new Map<string, string>();
+  const abilityNameById = new Map<number, string>();
 
   for (const row of packTypesRows) {
     if (!packTypesByPack.has(row.packId)) packTypesByPack.set(row.packId, []);
@@ -296,6 +365,7 @@ function buildGameData(tx: any, gameId: number, packIds: number[]) {
     if (!packAbilitiesByPack.has(row.packId)) packAbilitiesByPack.set(row.packId, []);
     packAbilitiesByPack.get(row.packId)!.push(row);
     abilityKeyByPackId.set(`${row.packId}:${row.id}`, normalizeKey(row.name));
+    abilityNameById.set(row.id, row.name);
   }
 
   for (const row of packItemsRows) {
@@ -323,17 +393,43 @@ function buildGameData(tx: any, gameId: number, packIds: number[]) {
         excludeInChart: row.excludeInChart ?? 0
       });
     }
+
+    const abilityEffective = new Map<string, { name: string; tags: string }>();
+    for (const importPackId of importChains.get(packId) ?? []) {
+      for (const row of packAbilitiesByPack.get(importPackId) ?? []) {
+        abilityEffective.set(normalizeKey(row.name), {
+          name: row.name,
+          tags: row.tags ?? "[]"
+        });
+      }
+    }
     for (const row of packAbilitiesByPack.get(packId) ?? []) {
-      resolvedAbilities.set(normalizeKey(row.name), {
+      abilityEffective.set(normalizeKey(row.name), {
         name: row.name,
         tags: row.tags ?? "[]"
       });
     }
+    for (const [key, row] of abilityEffective.entries()) {
+      resolvedAbilities.set(key, row);
+    }
+
+    const itemEffective = new Map<string, { name: string; tags: string }>();
+    for (const importPackId of importChains.get(packId) ?? []) {
+      for (const row of packItemsByPack.get(importPackId) ?? []) {
+        itemEffective.set(normalizeKey(row.name), {
+          name: row.name,
+          tags: row.tags ?? "[]"
+        });
+      }
+    }
     for (const row of packItemsByPack.get(packId) ?? []) {
-      resolvedItems.set(normalizeKey(row.name), {
+      itemEffective.set(normalizeKey(row.name), {
         name: row.name,
         tags: row.tags ?? "[]"
       });
+    }
+    for (const [key, row] of itemEffective.entries()) {
+      resolvedItems.set(key, row);
     }
   }
 
@@ -495,20 +591,20 @@ function buildGameData(tx: any, gameId: number, packIds: number[]) {
     packSpeciesAbilitiesByKey.get(key)!.push(row);
   }
 
-  for (const row of resolvedSpeciesList) {
-    const key = `${row.sourcePackId}:${row.sourceSpeciesId}`;
-    const abilityRows = packSpeciesAbilitiesByKey.get(key) ?? [];
-    const gameSpeciesId = gameSpeciesIdByKey.get(row.key);
-    if (!gameSpeciesId) continue;
-    for (const abilityRow of abilityRows) {
-      const abilityKey = abilityKeyByPackId.get(`${abilityRow.packId}:${abilityRow.abilityId}`);
-      if (!abilityKey) continue;
-      const gameAbilityId = gameAbilityIdByKey.get(abilityKey);
-      if (!gameAbilityId) continue;
-      tx.insert(gameSpeciesAbilities)
-        .values({
-          gameId,
-          speciesId: gameSpeciesId,
+    for (const row of resolvedSpeciesList) {
+      const key = `${row.sourcePackId}:${row.sourceSpeciesId}`;
+      const abilityRows = packSpeciesAbilitiesByKey.get(key) ?? [];
+      const gameSpeciesId = gameSpeciesIdByKey.get(row.key);
+      if (!gameSpeciesId) continue;
+      for (const abilityRow of abilityRows) {
+        const abilityName = abilityNameById.get(abilityRow.abilityId);
+        if (!abilityName) continue;
+        const gameAbilityId = gameAbilityIdByKey.get(normalizeKey(abilityName));
+        if (!gameAbilityId) continue;
+        tx.insert(gameSpeciesAbilities)
+          .values({
+            gameId,
+            speciesId: gameSpeciesId,
           abilityId: gameAbilityId,
           slot: abilityRow.slot
         })
@@ -592,6 +688,67 @@ app.get("/api/packs/:id", async (req, res) => {
   res.json(pack);
 });
 
+app.get("/api/packs/:id/imports", async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const rows = await db
+    .select({ importPackId: packImports.importPackId, sortOrder: packImports.sortOrder, name: packs.name })
+    .from(packImports)
+    .innerJoin(packs, eq(packImports.importPackId, packs.id))
+    .where(eq(packImports.packId, id))
+    .orderBy(packImports.sortOrder);
+  res.json(rows);
+});
+
+app.get("/api/packs/:id/abilities/all", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const chain = await getPackImportChainAsync(packId);
+  const sourcePackIds = [...chain, packId];
+  const rows =
+    sourcePackIds.length === 0
+      ? []
+      : await db.select().from(packAbilities).where(inArray(packAbilities.packId, sourcePackIds));
+  const byPack = new Map<number, typeof rows>();
+  for (const row of rows) {
+    if (!byPack.has(row.packId)) byPack.set(row.packId, []);
+    byPack.get(row.packId)!.push(row);
+  }
+  const effective = new Map<string, (typeof rows)[number]>();
+  for (const importPackId of chain) {
+    for (const row of byPack.get(importPackId) ?? []) {
+      effective.set(normalizeKey(row.name), row);
+    }
+  }
+  for (const row of byPack.get(packId) ?? []) {
+    effective.set(normalizeKey(row.name), row);
+  }
+  res.json(Array.from(effective.values()).sort((a, b) => a.name.localeCompare(b.name)));
+});
+
+app.get("/api/packs/:id/items/all", async (req, res) => {
+  const packId = idSchema.parse(req.params.id);
+  const chain = await getPackImportChainAsync(packId);
+  const sourcePackIds = [...chain, packId];
+  const rows =
+    sourcePackIds.length === 0
+      ? []
+      : await db.select().from(packItems).where(inArray(packItems.packId, sourcePackIds));
+  const byPack = new Map<number, typeof rows>();
+  for (const row of rows) {
+    if (!byPack.has(row.packId)) byPack.set(row.packId, []);
+    byPack.get(row.packId)!.push(row);
+  }
+  const effective = new Map<string, (typeof rows)[number]>();
+  for (const importPackId of chain) {
+    for (const row of byPack.get(importPackId) ?? []) {
+      effective.set(normalizeKey(row.name), row);
+    }
+  }
+  for (const row of byPack.get(packId) ?? []) {
+    effective.set(normalizeKey(row.name), row);
+  }
+  res.json(Array.from(effective.values()).sort((a, b) => a.name.localeCompare(b.name)));
+});
+
 app.post("/api/packs", async (req, res) => {
   const data = packSchema.parse(req.body);
   const payload = {
@@ -600,6 +757,16 @@ app.post("/api/packs", async (req, res) => {
     useSingleSpecial: data.useSingleSpecial ? 1 : 0
   };
   const [created] = await db.insert(packs).values(payload).returning();
+  const importPackIds = (data.importPackIds ?? []).filter((id) => id !== created.id);
+  if (importPackIds.length > 0) {
+    await db.insert(packImports).values(
+      importPackIds.map((importPackId, idx) => ({
+        packId: created.id,
+        importPackId,
+        sortOrder: idx
+      }))
+    );
+  }
   res.json({ ...created, useSingleSpecial: !!created.useSingleSpecial });
 });
 
@@ -616,6 +783,19 @@ app.put("/api/packs/:id", async (req, res) => {
     .set(payload)
     .where(eq(packs.id, id))
     .returning();
+  if (Array.isArray(data.importPackIds)) {
+    const importPackIds = data.importPackIds.filter((packId) => packId !== id);
+    await db.delete(packImports).where(eq(packImports.packId, id));
+    if (importPackIds.length > 0) {
+      await db.insert(packImports).values(
+        importPackIds.map((importPackId, idx) => ({
+          packId: id,
+          importPackId,
+          sortOrder: idx
+        }))
+      );
+    }
+  }
   res.json({ ...row, useSingleSpecial: !!row.useSingleSpecial });
 });
 
@@ -654,6 +834,7 @@ app.delete("/api/packs/:id", async (req, res) => {
     tx.delete(packAbilities).where(eq(packAbilities.packId, id)).run();
     tx.delete(packItems).where(eq(packItems.packId, id)).run();
     tx.delete(packTypes).where(eq(packTypes.packId, id)).run();
+    tx.delete(packImports).where(or(eq(packImports.packId, id), eq(packImports.importPackId, id))).run();
     tx.delete(packs).where(eq(packs.id, id)).run();
   });
   res.json({ ok: true });

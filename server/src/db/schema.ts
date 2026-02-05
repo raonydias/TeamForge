@@ -89,6 +89,19 @@ export const packItems = sqliteTable(
   })
 );
 
+export const packImports = sqliteTable(
+  "pack_imports",
+  {
+    packId: integer("pack_id").notNull().references(() => packs.id),
+    importPackId: integer("import_pack_id").notNull().references(() => packs.id),
+    sortOrder: integer("sort_order").notNull()
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.packId, t.importPackId] }),
+    orderIdx: uniqueIndex("pack_imports_pack_sort_idx").on(t.packId, t.sortOrder)
+  })
+);
+
 export const packSpeciesAbilities = sqliteTable(
   "pack_species_abilities",
   {

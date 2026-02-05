@@ -6,6 +6,6 @@ client/public/sprites
 client/public/types
 server/dist
 data/app.db
-to_import
+imports_exports
 .env
 *.log

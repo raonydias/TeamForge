@@ -62,12 +62,12 @@ export default function PackSpecies() {
     queryFn: () => api.get(`/packs/${packId}`)
   });
   const { data: abilities = [] } = useQuery<PackAbilityRow[]>({
-    queryKey: ["packs", packId, "abilities"],
-    queryFn: () => api.get(`/packs/${packId}/abilities`)
+    queryKey: ["packs", packId, "abilities", "all"],
+    queryFn: () => api.get(`/packs/${packId}/abilities/all`)
   });
   const { data: items = [] } = useQuery<PackItemRow[]>({
-    queryKey: ["packs", packId, "items"],
-    queryFn: () => api.get(`/packs/${packId}/items`)
+    queryKey: ["packs", packId, "items", "all"],
+    queryFn: () => api.get(`/packs/${packId}/items/all`)
   });
   const { data: species = [] } = useQuery<PackSpeciesRow[]>({
     queryKey: ["packs", packId, "species"],

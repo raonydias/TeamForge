@@ -5,8 +5,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { PackRow } from "../lib/types";
-import { Button, Card, CardHeader, Input, Modal, GhostButton } from "../components/ui";
+import { PackImportRow, PackRow } from "../lib/types";
+import { Button, Card, CardHeader, Input, Modal, GhostButton, Select } from "../components/ui";
 
 const schema = z.object({
   name: z.string().min(1),
@@ -19,6 +19,19 @@ type FormValues = z.infer<typeof schema>;
 export default function Packs() {
   const queryClient = useQueryClient();
   const { data: packs = [] } = useQuery<PackRow[]>({ queryKey: ["packs"], queryFn: () => api.get("/packs") });
+  const { data: packImportsMap = new Map<number, PackImportRow[]>() } = useQuery({
+    queryKey: ["packImports", packs.map((p) => p.id).join(",")],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        packs.map(async (pack) => {
+          const rows = await api.get<PackImportRow[]>(`/packs/${pack.id}/imports`);
+          return [pack.id, rows] as const;
+        })
+      );
+      return new Map(entries);
+    },
+    enabled: packs.length > 0
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -26,15 +39,23 @@ export default function Packs() {
   });
 
   const create = useMutation({
-    mutationFn: (payload: FormValues) => api.post("/packs", payload),
+    mutationFn: (payload: FormValues & { importPackIds: number[] }) => api.post("/packs", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["packs"] });
       form.reset();
+      setImportPackIds([]);
+      setNextImportPackId("");
     }
   });
 
   const update = useMutation({
-    mutationFn: (payload: { id: number; name: string; description: string | null; useSingleSpecial: boolean }) =>
+    mutationFn: (payload: {
+      id: number;
+      name: string;
+      description: string | null;
+      useSingleSpecial: boolean;
+      importPackIds: number[];
+    }) =>
       api.put(`/packs/${payload.id}`, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs"] })
   });
@@ -48,22 +69,117 @@ export default function Packs() {
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editSingleSpecial, setEditSingleSpecial] = useState(false);
+  const [editImportPackIds, setEditImportPackIds] = useState<number[]>([]);
+  const [editNextImportPackId, setEditNextImportPackId] = useState<number | "">("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [createDragIndex, setCreateDragIndex] = useState<number | null>(null);
+  const [importPackIds, setImportPackIds] = useState<number[]>([]);
+  const [nextImportPackId, setNextImportPackId] = useState<number | "">("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmBody, setConfirmBody] = useState<string[]>([]);
   const [confirmAction, setConfirmAction] = useState<null | (() => void)>(null);
 
+  const availableImportPacks = packs.filter((pack) => !importPackIds.includes(pack.id));
+  const availableEditImportPacks = packs.filter(
+    (pack) => pack.id !== editingId && !editImportPackIds.includes(pack.id)
+  );
+
+  function moveImport(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const next = [...importPackIds];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setImportPackIds(next);
+  }
+
+  function moveEditImport(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    const next = [...editImportPackIds];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setEditImportPackIds(next);
+  }
+
   return (
     <div className="grid lg:grid-cols-[360px_1fr] gap-6">
       <Card>
         <CardHeader title="Create Pack" subtitle="Base datasets for canon or fangames." />
-        <form className="space-y-3" onSubmit={form.handleSubmit((values) => create.mutate(values))}>
+        <form
+          className="space-y-3"
+          onSubmit={form.handleSubmit((values) =>
+            create.mutate({
+              ...values,
+              importPackIds
+            })
+          )}
+        >
           <Input placeholder="Pack name" {...form.register("name")} />
           <Input placeholder="Description" {...form.register("description")} />
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" {...form.register("useSingleSpecial")} />
             Gen 1 Special (SpA = SpD)
           </label>
+          <div className="space-y-2">
+            <div className="text-xs text-slate-500">Imported Abilities & Items (last wins)</div>
+            <div className="space-y-2">
+              {importPackIds.length === 0 ? (
+                <div className="text-xs text-slate-500">No imports selected.</div>
+              ) : (
+                importPackIds.map((packId, index) => {
+                  const pack = packs.find((p) => p.id === packId);
+                  return (
+                    <div
+                      key={packId}
+                      className="flex items-center justify-between gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                      draggable
+                      onDragStart={() => setCreateDragIndex(index)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (createDragIndex === null) return;
+                        moveImport(createDragIndex, index);
+                        setCreateDragIndex(null);
+                      }}
+                    >
+                      <span className="font-medium">{pack?.name ?? "Unknown Pack"}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="text-xs text-slate-400 hover:text-slate-600"
+                          onClick={() => setImportPackIds((prev) => prev.filter((id) => id !== packId))}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Select
+                value={nextImportPackId}
+                onChange={(e) => setNextImportPackId(e.target.value ? Number(e.target.value) : "")}
+              >
+                <option value="">Add pack</option>
+                {availableImportPacks.map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.name}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                type="button"
+                onClick={() => {
+                  if (typeof nextImportPackId !== "number") return;
+                  setImportPackIds((prev) => [...prev, nextImportPackId]);
+                  setNextImportPackId("");
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
           <Button type="submit">Create</Button>
         </form>
       </Card>
@@ -84,6 +200,66 @@ export default function Packs() {
                     />
                     Gen 1 Special (SpA = SpD)
                   </label>
+                  <div className="space-y-2">
+                    <div className="text-xs text-slate-500">Imported Abilities & Items (last wins)</div>
+                    <div className="space-y-2">
+                      {editImportPackIds.length === 0 ? (
+                        <div className="text-xs text-slate-500">No imports selected.</div>
+                      ) : (
+                        editImportPackIds.map((packId, index) => {
+                          const entry = packs.find((p) => p.id === packId);
+                          return (
+                            <div
+                              key={packId}
+                              className="flex items-center justify-between gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                              draggable
+                              onDragStart={() => setDragIndex(index)}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={() => {
+                                if (dragIndex === null) return;
+                                moveEditImport(dragIndex, index);
+                                setDragIndex(null);
+                              }}
+                            >
+                              <span className="font-medium">{entry?.name ?? "Unknown Pack"}</span>
+                              <button
+                                type="button"
+                                className="text-xs text-slate-400 hover:text-slate-600"
+                                onClick={() => setEditImportPackIds((prev) => prev.filter((id) => id !== packId))}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Select
+                        value={editNextImportPackId}
+                        onChange={(e) =>
+                          setEditNextImportPackId(e.target.value ? Number(e.target.value) : "")
+                        }
+                      >
+                        <option value="">Add pack</option>
+                        {availableEditImportPacks.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (typeof editNextImportPackId !== "number") return;
+                          setEditImportPackIds((prev) => [...prev, editNextImportPackId]);
+                          setEditNextImportPackId("");
+                        }}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  </div>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
@@ -91,7 +267,8 @@ export default function Packs() {
                           id: pack.id,
                           name: editName.trim(),
                           description: editDesc.trim() || null,
-                          useSingleSpecial: editSingleSpecial
+                          useSingleSpecial: editSingleSpecial,
+                          importPackIds: editImportPackIds
                         });
                         setEditingId(null);
                       }}
@@ -111,13 +288,28 @@ export default function Packs() {
                 <>
                   <div className="font-semibold text-lg">{pack.name}</div>
                   {pack.description ? <div className="text-sm text-slate-500">{pack.description}</div> : null}
+                  <div className="text-xs text-slate-500">
+                    Imports:{" "}
+                    {(packImportsMap.get(pack.id) ?? []).length
+                      ? (packImportsMap.get(pack.id) ?? [])
+                          .sort((a, b) => a.sortOrder - b.sortOrder)
+                          .map((row) => row.name)
+                          .join(" → ")
+                      : "None"}
+                  </div>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
-                        setEditingId(pack.id);
-                        setEditName(pack.name);
-                        setEditDesc(pack.description ?? "");
-                        setEditSingleSpecial(pack.useSingleSpecial);
+                        (async () => {
+                          setEditingId(pack.id);
+                          setEditName(pack.name);
+                          setEditDesc(pack.description ?? "");
+                          setEditSingleSpecial(pack.useSingleSpecial);
+                          setEditNextImportPackId("");
+                          const imports = await api.get<PackImportRow[]>(`/packs/${pack.id}/imports`);
+                          const ordered = [...imports].sort((a, b) => a.sortOrder - b.sortOrder);
+                          setEditImportPackIds(ordered.map((row) => row.importPackId));
+                        })();
                       }}
                       type="button"
                     >
