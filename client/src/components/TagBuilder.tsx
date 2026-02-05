@@ -12,7 +12,9 @@ type TagBuilderProps = {
 type TagKind =
   | "mult_stat"
   | "mult_defeff"
+  | "mult_spdeff"
   | "mult_off"
+  | "mult_defense"
   | "mult_off_type"
   | "mult_in_type"
   | "mult_stat_if_type"
@@ -31,7 +33,9 @@ type TagKind =
 const tagKinds: { id: TagKind; label: string }[] = [
   { id: "mult_stat", label: "Stat multiplier" },
   { id: "mult_defeff", label: "Defensive bulk (phys)" },
+  { id: "mult_spdeff", label: "Defensive bulk (spec)" },
   { id: "mult_off", label: "Offense multiplier" },
+  { id: "mult_defense", label: "Defense multiplier" },
   { id: "mult_off_type", label: "Offense by type" },
   { id: "mult_in_type", label: "Incoming by type" },
   { id: "mult_stat_if_type", label: "Stat if type" },
@@ -51,7 +55,9 @@ const tagKinds: { id: TagKind; label: string }[] = [
 const tagPatternsByKind: Record<TagKind, string> = {
   mult_stat: "mult:stat:multiplier",
   mult_defeff: "mult:defeff:N",
+  mult_spdeff: "mult:spdeff:N",
   mult_off: "mult:off:N",
+  mult_defense: "mult:defense:N",
   mult_off_type: "mult:off_type:type:N",
   mult_in_type: "mult:in_type:type:N",
   mult_stat_if_type: "mult:stat_if_type:stat:type:N",
@@ -128,9 +134,17 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
         if (!value) return;
         built = `mult:defeff:${value}`;
         break;
+      case "mult_spdeff":
+        if (!value) return;
+        built = `mult:spdeff:${value}`;
+        break;
       case "mult_off":
         if (!value) return;
         built = `mult:off:${value}`;
+        break;
+      case "mult_defense":
+        if (!value) return;
+        built = `mult:defense:${value}`;
         break;
       case "mult_off_type":
         if (!typeName || !value) return;
@@ -234,7 +248,7 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
               />
             </>
           ) : null}
-          {kind === "mult_defeff" || kind === "mult_off" ? (
+          {kind === "mult_defeff" || kind === "mult_spdeff" || kind === "mult_off" || kind === "mult_defense" ? (
             <Input
               className="flex-1 min-w-[140px]"
               placeholder="Multiplier"

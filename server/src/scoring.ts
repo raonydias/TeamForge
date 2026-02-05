@@ -118,7 +118,7 @@ export function computePotentials(
   const typeDefAdj = Math.pow(typeDef, scoringDefaults.typeDefExponent);
 
   const bulkPhys = Math.sqrt(adjusted.hp * adjusted.def) * tagEffects.defEffMult;
-  const bulkSpec = Math.sqrt(adjusted.hp * adjusted.spd);
+  const bulkSpec = Math.sqrt(adjusted.hp * adjusted.spd) * tagEffects.spdEffMult;
 
   const speedWeight = scoringDefaults.speedWeight;
   const baseOffPhys = (1 - speedWeight) * adjusted.atk + speedWeight * adjusted.spe;
@@ -142,8 +142,8 @@ export function computePotentials(
   const offMult = tagEffects.offMult * tagEffects.offTypeMult;
   const offensivePhysical = baseOffPhys * stabAdj * critInfo.expectedMult * offMult;
   const offensiveSpecial = baseOffSpec * stabAdj * critInfo.expectedMult * offMult;
-  const defensivePhysical = bulkPhys * typeDefAdj;
-  const defensiveSpecial = bulkSpec * typeDefAdj;
+  const defensivePhysical = bulkPhys * typeDefAdj * tagEffects.defenseMult;
+  const defensiveSpecial = bulkSpec * typeDefAdj * tagEffects.defenseMult;
 
   const off = 0.75 * Math.max(offensivePhysical, offensiveSpecial) + 0.25 * ((offensivePhysical + offensiveSpecial) / 2);
   const def = 0.75 * Math.max(defensivePhysical, defensiveSpecial) + 0.25 * ((defensivePhysical + defensiveSpecial) / 2);
@@ -212,7 +212,9 @@ function parseTagEffects(tags: string[], typeNames: Set<string>) {
     spe: 1
   };
   let defEffMult = 1;
+  let spdEffMult = 1;
   let offMult = 1;
+  let defenseMult = 1;
   let offTypeMult = 1;
   const inTypeMult = new Map<string, number>();
   let hasWonderGuard = false;
@@ -242,9 +244,21 @@ function parseTagEffects(tags: string[], typeNames: Set<string>) {
       continue;
     }
 
+    if (second === "spdeff") {
+      const parsed = Number(parts[2]);
+      if (Number.isFinite(parsed)) spdEffMult *= parsed;
+      continue;
+    }
+
     if (second === "off") {
       const parsed = Number(parts[2]);
       if (Number.isFinite(parsed)) offMult *= parsed;
+      continue;
+    }
+
+    if (second === "defense") {
+      const parsed = Number(parts[2]);
+      if (Number.isFinite(parsed)) defenseMult *= parsed;
       continue;
     }
 
@@ -283,7 +297,16 @@ function parseTagEffects(tags: string[], typeNames: Set<string>) {
     }
   }
 
-  return { statMultipliers, defEffMult, offMult, offTypeMult, inTypeMult, hasWonderGuard };
+  return {
+    statMultipliers,
+    defEffMult,
+    spdEffMult,
+    offMult,
+    defenseMult,
+    offTypeMult,
+    inTypeMult,
+    hasWonderGuard
+  };
 }
 
 const critStagePresets: Record<string, number[]> = {
