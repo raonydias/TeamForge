@@ -2,22 +2,19 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { PackItemRow } from "../lib/types";
+import { PackItemRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
 import { Button, Card, CardHeader, Input } from "../components/ui";
-
-function parseTags(input: string) {
-    return input
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
-}
+import { TagBuilder } from "../components/TagBuilder";
 
 function parseStoredTags(raw: string) {
     try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) return parsed.map(String);
     } catch {
-        return parseTags(raw);
+        return raw
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean);
     }
     return [];
 }
@@ -33,17 +30,29 @@ export default function PackItems() {
     });
 
     const [name, setName] = useState("");
-    const [tags, setTags] = useState("");
+    const [tags, setTags] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editName, setEditName] = useState("");
-    const [editTags, setEditTags] = useState("");
+    const [editTags, setEditTags] = useState<string[]>([]);
+
+    const { data: types = [] } = useQuery<PackTypeRow[]>({
+        queryKey: ["packs", packId, "types"],
+        queryFn: () => api.get(`/packs/${packId}/types`),
+    });
+    const { data: species = [] } = useQuery<PackSpeciesRow[]>({
+        queryKey: ["packs", packId, "species"],
+        queryFn: () => api.get(`/packs/${packId}/species`),
+    });
+
+    const typeNames = types.map((t) => t.name);
+    const speciesNames = species.map((s) => s.name);
 
     const create = useMutation({
         mutationFn: (payload: { name: string; tags: string[] }) => api.post(`/packs/${packId}/items`, payload),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] });
             setName("");
-            setTags("");
+            setTags([]);
         },
     });
 
@@ -64,12 +73,8 @@ export default function PackItems() {
                 <CardHeader title="Add Item" subtitle="Tags follow ability syntax." />
                 <div className="space-y-3">
                     <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-                    <Input
-                        placeholder="Tags (comma-separated)"
-                        value={tags}
-                        onChange={(e) => setTags(e.target.value)}
-                    />
-                    <Button onClick={() => create.mutate({ name, tags: parseTags(tags) })}>Save</Button>
+                    <TagBuilder tags={tags} onChange={setTags} types={typeNames} species={speciesNames} />
+                    <Button onClick={() => create.mutate({ name, tags })}>Save</Button>
                     <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
                         <div className="font-semibold text-slate-600 mb-1">Available tag patterns</div>
                         <div className="grid grid-cols-2 gap-2">
@@ -100,18 +105,14 @@ export default function PackItems() {
                             {editingId === i.id ? (
                                 <div className="space-y-2">
                                     <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                                    <Input
-                                        value={editTags}
-                                        onChange={(e) => setEditTags(e.target.value)}
-                                        placeholder="Tags (comma-separated)"
-                                    />
+                                    <TagBuilder tags={editTags} onChange={setEditTags} types={typeNames} species={speciesNames} />
                                     <div className="flex gap-2">
                                         <Button
                                             onClick={() => {
                                                 update.mutate({
                                                     id: i.id,
                                                     name: editName.trim(),
-                                                    tags: parseTags(editTags),
+                                                    tags: editTags,
                                                 });
                                                 setEditingId(null);
                                             }}
@@ -133,7 +134,7 @@ export default function PackItems() {
                                             onClick={() => {
                                                 setEditingId(i.id);
                                                 setEditName(i.name);
-                                                setEditTags(parseStoredTags(i.tags).join(", "));
+                                                setEditTags(parseStoredTags(i.tags));
                                             }}
                                             type="button"
                                         >

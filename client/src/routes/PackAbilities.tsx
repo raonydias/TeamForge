@@ -2,22 +2,19 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
-import { PackAbilityRow } from "../lib/types";
+import { PackAbilityRow, PackSpeciesRow, PackTypeRow } from "../lib/types";
 import { Button, Card, CardHeader, Input } from "../components/ui";
-
-function parseTags(input: string) {
-  return input
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
+import { TagBuilder } from "../components/TagBuilder";
 
 function parseStoredTags(raw: string) {
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {
-    return parseTags(raw);
+    return raw
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
   }
   return [];
 }
@@ -33,17 +30,29 @@ export default function PackAbilities() {
   });
 
   const [name, setName] = useState("");
-  const [tags, setTags] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
-  const [editTags, setEditTags] = useState("");
+  const [editTags, setEditTags] = useState<string[]>([]);
+
+  const { data: types = [] } = useQuery<PackTypeRow[]>({
+    queryKey: ["packs", packId, "types"],
+    queryFn: () => api.get(`/packs/${packId}/types`)
+  });
+  const { data: species = [] } = useQuery<PackSpeciesRow[]>({
+    queryKey: ["packs", packId, "species"],
+    queryFn: () => api.get(`/packs/${packId}/species`)
+  });
+
+  const typeNames = types.map((t) => t.name);
+  const speciesNames = species.map((s) => s.name);
 
   const create = useMutation({
     mutationFn: (payload: { name: string; tags: string[] }) => api.post(`/packs/${packId}/abilities`, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["packs", packId, "abilities"] });
       setName("");
-      setTags("");
+      setTags([]);
     }
   });
 
@@ -64,8 +73,28 @@ export default function PackAbilities() {
         <CardHeader title="Add Ability" subtitle="Use tags like mult:atk:1.2, immune:ground." />
         <div className="space-y-3">
           <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input placeholder="Tags (comma-separated)" value={tags} onChange={(e) => setTags(e.target.value)} />
-          <Button onClick={() => create.mutate({ name, tags: parseTags(tags) })}>Save</Button>
+          <TagBuilder
+            tags={tags}
+            onChange={setTags}
+            types={typeNames}
+            species={speciesNames}
+            allowedKinds={[
+              "mult_stat",
+              "mult_defeff",
+              "mult_off",
+              "mult_off_type",
+              "mult_stat_if_type",
+              "immune",
+              "resist",
+              "weak",
+              "species",
+              "crit_chance",
+              "crit_damage",
+              "crit_stage",
+              "flag_wonder_guard"
+            ]}
+          />
+          <Button onClick={() => create.mutate({ name, tags })}>Save</Button>
           <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
             <div className="font-semibold text-slate-600 mb-1">Available tag patterns</div>
             <div className="grid grid-cols-2 gap-2">
@@ -94,11 +123,31 @@ export default function PackAbilities() {
               {editingId === a.id ? (
                 <div className="space-y-2">
                   <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                  <Input value={editTags} onChange={(e) => setEditTags(e.target.value)} placeholder="Tags (comma-separated)" />
+                  <TagBuilder
+                    tags={editTags}
+                    onChange={setEditTags}
+                    types={typeNames}
+                    species={speciesNames}
+                    allowedKinds={[
+                      "mult_stat",
+                      "mult_defeff",
+                      "mult_off",
+                      "mult_off_type",
+                      "mult_stat_if_type",
+                      "immune",
+                      "resist",
+                      "weak",
+                      "species",
+                      "crit_chance",
+                      "crit_damage",
+                      "crit_stage",
+                      "flag_wonder_guard"
+                    ]}
+                  />
                   <div className="flex gap-2">
                     <Button
                       onClick={() => {
-                        update.mutate({ id: a.id, name: editName.trim(), tags: parseTags(editTags) });
+                        update.mutate({ id: a.id, name: editName.trim(), tags: editTags });
                         setEditingId(null);
                       }}
                       type="button"
@@ -119,7 +168,7 @@ export default function PackAbilities() {
                       onClick={() => {
                         setEditingId(a.id);
                         setEditName(a.name);
-                        setEditTags(parseStoredTags(a.tags).join(", "));
+                        setEditTags(parseStoredTags(a.tags));
                       }}
                       type="button"
                     >
