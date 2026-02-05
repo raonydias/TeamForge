@@ -105,6 +105,8 @@ export function computePotentials(
       mult *= chartMap.get(`${atk.id}-${type2Id}`) ?? 1;
     }
     mult *= tagMultiplierForType(tags, atk.name);
+    const inType = tagEffects.inTypeMult.get(atk.name.toLowerCase());
+    if (inType) mult *= inType;
     if (tagEffects.hasWonderGuard && mult <= 1) {
       mult = 0;
     }
@@ -169,17 +171,34 @@ export function computePotentials(
   };
 }
 
-function tagMultiplierForType(tags: string[], typeName: string) {
+function tagMultiplierForType(tags: string[], typeName: string, options?: { treatInTypeAsResist?: boolean }) {
   const normalized = typeName.toLowerCase();
   let multiplier = 1;
-  for (const tag of tags) {
-    const [kind, tagType] = tag.split(":");
-    if (!tagType) continue;
-    if (tagType.toLowerCase() !== normalized) continue;
-    if (kind === "immune") return 0;
-    if (kind === "resist") multiplier *= 0.5;
-    if (kind === "weak") multiplier *= 2;
+
+  for (const rawTag of tags) {
+    const parts = rawTag.split(":").map((part) => part.trim());
+    const kind = parts[0]?.toLowerCase();
+    if (!kind) continue;
+
+    if (kind === "immune" && parts[1]?.toLowerCase() === normalized) {
+      return 0;
+    }
+    if (kind === "resist" && parts[1]?.toLowerCase() === normalized) {
+      multiplier *= 0.5;
+    }
+    if (kind === "weak" && parts[1]?.toLowerCase() === normalized) {
+      multiplier *= 2;
+    }
+    if (
+      options?.treatInTypeAsResist &&
+      kind === "mult" &&
+      parts[1]?.toLowerCase() === "in_type" &&
+      parts[2]?.toLowerCase() === normalized
+    ) {
+      multiplier *= 0.5;
+    }
   }
+
   return multiplier;
 }
 
@@ -195,6 +214,7 @@ function parseTagEffects(tags: string[], typeNames: Set<string>) {
   let defEffMult = 1;
   let offMult = 1;
   let offTypeMult = 1;
+  const inTypeMult = new Map<string, number>();
   let hasWonderGuard = false;
 
   for (const rawTag of tags) {
@@ -236,6 +256,15 @@ function parseTagEffects(tags: string[], typeNames: Set<string>) {
       continue;
     }
 
+    if (second === "in_type") {
+      const typeName = parts[2]?.toLowerCase();
+      const parsed = Number(parts[3]);
+      if (!typeName || !Number.isFinite(parsed)) continue;
+      const current = inTypeMult.get(typeName) ?? 1;
+      inTypeMult.set(typeName, current * parsed);
+      continue;
+    }
+
     if (second === "stat_if_type") {
       const stat = parts[2]?.toLowerCase() as keyof BaseStats | undefined;
       const typeName = parts[3]?.toLowerCase();
@@ -254,7 +283,7 @@ function parseTagEffects(tags: string[], typeNames: Set<string>) {
     }
   }
 
-  return { statMultipliers, defEffMult, offMult, offTypeMult, hasWonderGuard };
+  return { statMultipliers, defEffMult, offMult, offTypeMult, inTypeMult, hasWonderGuard };
 }
 
 const critStagePresets: Record<string, number[]> = {
@@ -343,7 +372,7 @@ export function computeTeamChart(
         mult *= value;
       }
 
-      const tagMult = tagMultiplierForType(member.tags, atk.name);
+      const tagMult = tagMultiplierForType(member.tags, atk.name, { treatInTypeAsResist: true });
       mult *= tagMult;
 
       if (mult === 0) immune += 1;
@@ -384,7 +413,7 @@ export function computeDefenseMatrix(
         mult *= value;
       }
 
-      const tagMult = tagMultiplierForType(member.tags, atk.name);
+      const tagMult = tagMultiplierForType(member.tags, atk.name, { treatInTypeAsResist: true });
       mult *= tagMult;
 
       if (mult > 1) weak += 1;

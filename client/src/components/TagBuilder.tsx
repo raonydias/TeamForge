@@ -14,6 +14,7 @@ type TagKind =
   | "mult_defeff"
   | "mult_off"
   | "mult_off_type"
+  | "mult_in_type"
   | "mult_stat_if_type"
   | "immune"
   | "resist"
@@ -32,6 +33,7 @@ const tagKinds: { id: TagKind; label: string }[] = [
   { id: "mult_defeff", label: "Defensive bulk (phys)" },
   { id: "mult_off", label: "Offense multiplier" },
   { id: "mult_off_type", label: "Offense by type" },
+  { id: "mult_in_type", label: "Incoming by type" },
   { id: "mult_stat_if_type", label: "Stat if type" },
   { id: "immune", label: "Immune to type" },
   { id: "resist", label: "Resist type" },
@@ -51,6 +53,7 @@ const tagPatternsByKind: Record<TagKind, string> = {
   mult_defeff: "mult:defeff:N",
   mult_off: "mult:off:N",
   mult_off_type: "mult:off_type:type:N",
+  mult_in_type: "mult:in_type:type:N",
   mult_stat_if_type: "mult:stat_if_type:stat:type:N",
   immune: "immune:type",
   resist: "resist:type",
@@ -132,6 +135,10 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
       case "mult_off_type":
         if (!typeName || !value) return;
         built = `mult:off_type:${typeName}:${value}`;
+        break;
+      case "mult_in_type":
+        if (!typeName || !value) return;
+        built = `mult:in_type:${typeName}:${value}`;
         break;
       case "mult_stat_if_type":
         if (!stat || !typeName || !value) return;
@@ -235,7 +242,7 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
               onChange={(e) => setValue(e.target.value)}
             />
           ) : null}
-          {kind === "mult_off_type" ? (
+          {kind === "mult_off_type" || kind === "mult_in_type" ? (
             <>
               <Select className="flex-[1.2] min-w-[160px]" value={typeName} onChange={(e) => setTypeName(e.target.value)}>
                 {types.map((t) => (
