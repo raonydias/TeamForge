@@ -24,7 +24,8 @@ type TagKind =
   | "crit_chance"
   | "crit_damage"
   | "crit_stage"
-  | "flag_wonder_guard";
+  | "flag_wonder_guard"
+  | "flag_avoid";
 
 const tagKinds: { id: TagKind; label: string }[] = [
   { id: "mult_stat", label: "Stat multiplier" },
@@ -41,8 +42,28 @@ const tagKinds: { id: TagKind; label: string }[] = [
   { id: "crit_chance", label: "Crit chance" },
   { id: "crit_damage", label: "Crit damage" },
   { id: "crit_stage", label: "Crit stage" },
-  { id: "flag_wonder_guard", label: "Wonder Guard flag" }
+  { id: "flag_wonder_guard", label: "Wonder Guard flag" },
+  { id: "flag_avoid", label: "Avoid flag" }
 ];
+
+const tagPatternsByKind: Record<TagKind, string> = {
+  mult_stat: "mult:stat:multiplier",
+  mult_defeff: "mult:defeff:N",
+  mult_off: "mult:off:N",
+  mult_off_type: "mult:off_type:type:N",
+  mult_stat_if_type: "mult:stat_if_type:stat:type:N",
+  immune: "immune:type",
+  resist: "resist:type",
+  weak: "weak:type",
+  evolution_item: "evolution:item",
+  evolution_stone: "evolution:stone",
+  species: "species:name",
+  crit_chance: "crit:chance:+N",
+  crit_damage: "crit:damage:xN",
+  crit_stage: "crit:stage:+N",
+  flag_wonder_guard: "flag:wonder_guard",
+  flag_avoid: "flag:avoid"
+};
 
 const statOptions = ["hp", "atk", "def", "spa", "spd", "spe"];
 
@@ -61,6 +82,10 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
   const kindOptions = useMemo(
     () => tagKinds.filter((k) => availableKinds.includes(k.id)),
     [availableKinds]
+  );
+  const patternList = useMemo(
+    () => kindOptions.map((opt) => tagPatternsByKind[opt.id]),
+    [kindOptions]
   );
   const [kind, setKind] = useState<TagKind>(availableKinds[0] ?? "mult_stat");
   const [stat, setStat] = useState("atk");
@@ -148,6 +173,9 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
         break;
       case "flag_wonder_guard":
         built = "flag:wonder_guard";
+        break;
+      case "flag_avoid":
+        built = "flag:avoid";
         break;
     }
 
@@ -274,7 +302,10 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
               onChange={(e) => setValue(e.target.value)}
             />
           ) : null}
-          {kind === "evolution_item" || kind === "evolution_stone" || kind === "flag_wonder_guard" ? (
+          {kind === "evolution_item" ||
+          kind === "evolution_stone" ||
+          kind === "flag_wonder_guard" ||
+          kind === "flag_avoid" ? (
             <span className="text-xs text-slate-500 self-center">No extra fields</span>
           ) : null}
         </div>
@@ -304,6 +335,18 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
           >
             Apply raw tags
           </Button>
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            <div className="font-semibold text-slate-600 mb-1">Available tag patterns</div>
+            <div className="space-y-2">
+              {patternList.map((pattern) => (
+                <div key={pattern} className="rounded-md bg-white px-2 py-1">
+                  <span className="block truncate max-w-[260px]" title={pattern}>
+                    {pattern}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

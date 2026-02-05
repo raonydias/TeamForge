@@ -91,28 +91,11 @@ export default function PackAbilities() {
               "crit_chance",
               "crit_damage",
               "crit_stage",
-              "flag_wonder_guard"
+              "flag_wonder_guard",
+              "flag_avoid"
             ]}
           />
           <Button onClick={() => create.mutate({ name, tags })}>Save</Button>
-          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            <div className="font-semibold text-slate-600 mb-1">Available tag patterns</div>
-            <div className="grid grid-cols-2 gap-2">
-              <span className="rounded-md bg-white px-2 py-1">mult:stat:multiplier</span>
-              <span className="rounded-md bg-white px-2 py-1">mult:defeff:N</span>
-              <span className="rounded-md bg-white px-2 py-1">mult:off:N</span>
-              <span className="rounded-md bg-white px-2 py-1">mult:off_type:type:N</span>
-              <span className="rounded-md bg-white px-2 py-1">mult:stat_if_type:stat:type:N</span>
-              <span className="rounded-md bg-white px-2 py-1">immune:type</span>
-              <span className="rounded-md bg-white px-2 py-1">resist:type</span>
-              <span className="rounded-md bg-white px-2 py-1">weak:type</span>
-              <span className="rounded-md bg-white px-2 py-1">flag:wonder_guard</span>
-              <span className="rounded-md bg-white px-2 py-1">species:name</span>
-              <span className="rounded-md bg-white px-2 py-1">crit:chance:+N</span>
-              <span className="rounded-md bg-white px-2 py-1">crit:damage:xN</span>
-              <span className="rounded-md bg-white px-2 py-1">crit:stage:+N</span>
-            </div>
-          </div>
         </div>
       </Card>
       <Card>
@@ -141,7 +124,8 @@ export default function PackAbilities() {
                       "crit_chance",
                       "crit_damage",
                       "crit_stage",
-                      "flag_wonder_guard"
+                      "flag_wonder_guard",
+                      "flag_avoid"
                     ]}
                   />
                   <div className="flex gap-2">
