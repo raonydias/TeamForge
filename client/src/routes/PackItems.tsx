@@ -74,9 +74,14 @@ export default function PackItems() {
                         <div className="font-semibold text-slate-600 mb-1">Available tag patterns</div>
                         <div className="grid grid-cols-2 gap-2">
                             <span className="rounded-md bg-white px-2 py-1">mult:stat:multiplier</span>
+                            <span className="rounded-md bg-white px-2 py-1">mult:defeff:N</span>
+                            <span className="rounded-md bg-white px-2 py-1">mult:off:N</span>
+                            <span className="rounded-md bg-white px-2 py-1">mult:off_type:type:N</span>
+                            <span className="rounded-md bg-white px-2 py-1">mult:stat_if_type:stat:type:N</span>
                             <span className="rounded-md bg-white px-2 py-1">immune:type</span>
                             <span className="rounded-md bg-white px-2 py-1">resist:type</span>
                             <span className="rounded-md bg-white px-2 py-1">weak:type</span>
+                            <span className="rounded-md bg-white px-2 py-1">flag:wonder_guard</span>
                             <span className="rounded-md bg-white px-2 py-1">evolution:item</span>
                             <span className="rounded-md bg-white px-2 py-1">evolution:stone</span>
                             <span className="rounded-md bg-white px-2 py-1">species:name</span>

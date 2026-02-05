@@ -59,32 +59,7 @@ export function parseTags(raw: string | null | undefined) {
   return [] as string[];
 }
 
-function applyStatMultipliers(stats: BaseStats, tags: string[]) {
-  const multipliers: Record<keyof BaseStats, number> = {
-    hp: 1,
-    atk: 1,
-    def: 1,
-    spa: 1,
-    spd: 1,
-    spe: 1
-  };
-
-  for (const tag of tags) {
-    const parts = tag.split(":");
-    if (parts.length === 3 && parts[0] === "mult") {
-      const stat = parts[1];
-      const value = Number(parts[2]);
-      if (Number.isFinite(value)) {
-        if (stat === "hp") multipliers.hp *= value;
-        if (stat === "atk") multipliers.atk *= value;
-        if (stat === "def") multipliers.def *= value;
-        if (stat === "spa") multipliers.spa *= value;
-        if (stat === "spd") multipliers.spd *= value;
-        if (stat === "speed" || stat === "spe") multipliers.spe *= value;
-      }
-    }
-  }
-
+function applyStatMultipliers(stats: BaseStats, multipliers: Record<keyof BaseStats, number>) {
   return {
     hp: stats.hp * multipliers.hp,
     atk: stats.atk * multipliers.atk,
@@ -106,7 +81,15 @@ export function computePotentials(
   critBaseDamageMult: number,
   critBaseChance?: number
 ): Potentials {
-  const adjusted = applyStatMultipliers(stats, tags);
+  const typeNameById = new Map(typesList.map((t) => [t.id, t.name.toLowerCase()]));
+  const typeNames = new Set<string>();
+  const type1Name = typeNameById.get(type1Id);
+  const type2Name = type2Id ? typeNameById.get(type2Id) : null;
+  if (type1Name) typeNames.add(type1Name);
+  if (type2Name) typeNames.add(type2Name);
+
+  const tagEffects = parseTagEffects(tags, typeNames);
+  const adjusted = applyStatMultipliers(stats, tagEffects.statMultipliers);
 
   const chartMap = new Map<string, number>();
   for (const row of chartRows) {
@@ -122,6 +105,9 @@ export function computePotentials(
       mult *= chartMap.get(`${atk.id}-${type2Id}`) ?? 1;
     }
     mult *= tagMultiplierForType(tags, atk.name);
+    if (tagEffects.hasWonderGuard && mult <= 1) {
+      mult = 0;
+    }
     incomingSum += mult ** 2;
   }
   const avgIncoming = incomingSum / typesCount;
@@ -129,7 +115,7 @@ export function computePotentials(
   const typeDef = 1 / Math.sqrt(safeIncoming);
   const typeDefAdj = Math.pow(typeDef, scoringDefaults.typeDefExponent);
 
-  const bulkPhys = Math.sqrt(adjusted.hp * adjusted.def);
+  const bulkPhys = Math.sqrt(adjusted.hp * adjusted.def) * tagEffects.defEffMult;
   const bulkSpec = Math.sqrt(adjusted.hp * adjusted.spd);
 
   const speedWeight = scoringDefaults.speedWeight;
@@ -151,8 +137,9 @@ export function computePotentials(
   const stabAdj = Math.pow(stabCov, scoringDefaults.stabExponent);
 
   const critInfo = computeCritExpectedMult(tags, critStagePreset, critBaseDamageMult, critBaseChance);
-  const offensivePhysical = baseOffPhys * stabAdj * critInfo.expectedMult;
-  const offensiveSpecial = baseOffSpec * stabAdj * critInfo.expectedMult;
+  const offMult = tagEffects.offMult * tagEffects.offTypeMult;
+  const offensivePhysical = baseOffPhys * stabAdj * critInfo.expectedMult * offMult;
+  const offensiveSpecial = baseOffSpec * stabAdj * critInfo.expectedMult * offMult;
   const defensivePhysical = bulkPhys * typeDefAdj;
   const defensiveSpecial = bulkSpec * typeDefAdj;
 
@@ -194,6 +181,80 @@ function tagMultiplierForType(tags: string[], typeName: string) {
     if (kind === "weak") multiplier *= 2;
   }
   return multiplier;
+}
+
+function parseTagEffects(tags: string[], typeNames: Set<string>) {
+  const statMultipliers: Record<keyof BaseStats, number> = {
+    hp: 1,
+    atk: 1,
+    def: 1,
+    spa: 1,
+    spd: 1,
+    spe: 1
+  };
+  let defEffMult = 1;
+  let offMult = 1;
+  let offTypeMult = 1;
+  let hasWonderGuard = false;
+
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+    if (!tag) continue;
+    const parts = tag.split(":").map((part) => part.trim());
+    const kind = parts[0]?.toLowerCase();
+    if (!kind) continue;
+
+    if (kind === "flag" || kind === "special") {
+      if (parts[1]?.toLowerCase() === "wonder_guard") {
+        hasWonderGuard = true;
+      }
+      continue;
+    }
+
+    if (kind !== "mult") continue;
+
+    const second = parts[1]?.toLowerCase();
+    if (!second) continue;
+
+    if (second === "defeff") {
+      const parsed = Number(parts[2]);
+      if (Number.isFinite(parsed)) defEffMult *= parsed;
+      continue;
+    }
+
+    if (second === "off") {
+      const parsed = Number(parts[2]);
+      if (Number.isFinite(parsed)) offMult *= parsed;
+      continue;
+    }
+
+    if (second === "off_type") {
+      const typeName = parts[2]?.toLowerCase();
+      const parsed = Number(parts[3]);
+      if (!typeName || !Number.isFinite(parsed)) continue;
+      if (typeNames.has(typeName)) offTypeMult *= parsed;
+      continue;
+    }
+
+    if (second === "stat_if_type") {
+      const stat = parts[2]?.toLowerCase() as keyof BaseStats | undefined;
+      const typeName = parts[3]?.toLowerCase();
+      const parsed = Number(parts[4]);
+      if (!stat || !(stat in statMultipliers)) continue;
+      if (!typeName || !Number.isFinite(parsed)) continue;
+      if (typeNames.has(typeName)) statMultipliers[stat] *= parsed;
+      continue;
+    }
+
+    if (second in statMultipliers) {
+      const parsed = Number(parts[2]);
+      if (Number.isFinite(parsed)) {
+        statMultipliers[second as keyof BaseStats] *= parsed;
+      }
+    }
+  }
+
+  return { statMultipliers, defEffMult, offMult, offTypeMult, hasWonderGuard };
 }
 
 const critStagePresets: Record<string, number[]> = {
