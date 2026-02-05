@@ -92,6 +92,40 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
     () => tagKinds.filter((k) => availableKinds.includes(k.id)),
     [availableKinds]
   );
+  const groupedKinds = useMemo(() => {
+    const inAvailable = (id: TagKind) => availableKinds.includes(id);
+    return [
+      {
+        label: "Core Multipliers",
+        ids: [
+          "mult_stat",
+          "mult_stat_if_type",
+          "mult_defeff",
+          "mult_spdeff",
+          "mult_defense",
+          "mult_off",
+          "mult_off_type",
+          "mult_in_type"
+        ].filter(inAvailable)
+      },
+      {
+        label: "Type Matchups",
+        ids: ["immune", "resist", "weak", "flag_wonder_guard"].filter(inAvailable)
+      },
+      {
+        label: "Crit",
+        ids: ["crit_chance", "crit_damage", "crit_stage"].filter(inAvailable)
+      },
+      {
+        label: "Species / Evolution",
+        ids: ["species", "evolution_item", "evolution_stone"].filter(inAvailable)
+      },
+      {
+        label: "Flags",
+        ids: ["flag_avoid"].filter(inAvailable)
+      }
+    ].filter((group) => group.ids.length > 0);
+  }, [availableKinds]);
   const patternList = useMemo(
     () => kindOptions.map((opt) => tagPatternsByKind[opt.id]),
     [kindOptions]
@@ -224,10 +258,18 @@ export function TagBuilder({ tags, onChange, types, species, allowedKinds }: Tag
       </div>
       <div className="space-y-2">
         <Select value={kind} onChange={(e) => setKind(e.target.value as TagKind)}>
-          {kindOptions.map((opt) => (
-            <option key={opt.id} value={opt.id}>
-              {opt.label}
-            </option>
+          {groupedKinds.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.ids.map((id) => {
+                const opt = kindOptions.find((k) => k.id === id);
+                if (!opt) return null;
+                return (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                );
+              })}
+            </optgroup>
           ))}
         </Select>
         <div className="flex flex-wrap gap-2">

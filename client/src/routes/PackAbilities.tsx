@@ -81,7 +81,9 @@ export default function PackAbilities() {
             allowedKinds={[
               "mult_stat",
               "mult_defeff",
+              "mult_spdeff",
               "mult_off",
+              "mult_defense",
               "mult_off_type",
               "mult_in_type",
               "mult_stat_if_type",
@@ -115,7 +117,9 @@ export default function PackAbilities() {
                     allowedKinds={[
                       "mult_stat",
                       "mult_defeff",
+                      "mult_spdeff",
                       "mult_off",
+                      "mult_defense",
                       "mult_off_type",
                       "mult_in_type",
                       "mult_stat_if_type",
