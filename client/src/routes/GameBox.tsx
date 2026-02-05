@@ -511,7 +511,26 @@ export default function GameBox() {
       id: "rank",
       header: "Box Rank",
       accessorFn: (row) => row.potentials.boxRank,
-      cell: ({ row }) => <span className="font-semibold text-ink">{row.original.potentials.boxRank.toFixed(2)}</span>
+      cell: ({ row }) => {
+        const potentials = row.original.potentials;
+        const showCrit = potentials.critTagsApplied;
+        const critTitle = showCrit
+          ? `Crit stage +${potentials.critStage}\nCrit chance ${(potentials.critChance * 100).toFixed(1)}%\nCrit damage x${potentials.critDamageMult.toFixed(2)}\nExpected x${potentials.critExpectedMult.toFixed(2)}`
+          : "";
+        return (
+          <span className="inline-flex items-center gap-1 font-semibold text-ink">
+            {potentials.boxRank.toFixed(2)}
+            {showCrit ? (
+              <span
+                title={critTitle}
+                className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300 text-[10px] text-slate-500 cursor-help"
+              >
+                i
+              </span>
+            ) : null}
+          </span>
+        );
+      }
     },
     {
       id: "remove",

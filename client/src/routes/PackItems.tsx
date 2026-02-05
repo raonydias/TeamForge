@@ -6,117 +6,144 @@ import { PackItemRow } from "../lib/types";
 import { Button, Card, CardHeader, Input } from "../components/ui";
 
 function parseTags(input: string) {
-  return input
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
+    return input
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
 }
 
 function parseStoredTags(raw: string) {
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed.map(String);
-  } catch {
-    return parseTags(raw);
-  }
-  return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+        return parseTags(raw);
+    }
+    return [];
 }
 
 export default function PackItems() {
-  const { id } = useParams();
-  const packId = Number(id);
-  const queryClient = useQueryClient();
+    const { id } = useParams();
+    const packId = Number(id);
+    const queryClient = useQueryClient();
 
-  const { data: items = [] } = useQuery<PackItemRow[]>({
-    queryKey: ["packs", packId, "items"],
-    queryFn: () => api.get(`/packs/${packId}/items`)
-  });
+    const { data: items = [] } = useQuery<PackItemRow[]>({
+        queryKey: ["packs", packId, "items"],
+        queryFn: () => api.get(`/packs/${packId}/items`),
+    });
 
-  const [name, setName] = useState("");
-  const [tags, setTags] = useState("");
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editTags, setEditTags] = useState("");
+    const [name, setName] = useState("");
+    const [tags, setTags] = useState("");
+    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editName, setEditName] = useState("");
+    const [editTags, setEditTags] = useState("");
 
-  const create = useMutation({
-    mutationFn: (payload: { name: string; tags: string[] }) => api.post(`/packs/${packId}/items`, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] });
-      setName("");
-      setTags("");
-    }
-  });
+    const create = useMutation({
+        mutationFn: (payload: { name: string; tags: string[] }) => api.post(`/packs/${packId}/items`, payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] });
+            setName("");
+            setTags("");
+        },
+    });
 
-  const update = useMutation({
-    mutationFn: (payload: { id: number; name: string; tags: string[] }) =>
-      api.put(`/packs/${packId}/items/${payload.id}`, payload),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] })
-  });
+    const update = useMutation({
+        mutationFn: (payload: { id: number; name: string; tags: string[] }) =>
+            api.put(`/packs/${packId}/items/${payload.id}`, payload),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] }),
+    });
 
-  const remove = useMutation({
-    mutationFn: (idValue: number) => api.del(`/packs/${packId}/items/${idValue}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] })
-  });
+    const remove = useMutation({
+        mutationFn: (idValue: number) => api.del(`/packs/${packId}/items/${idValue}`),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["packs", packId, "items"] }),
+    });
 
-  return (
-    <div className="grid lg:grid-cols-[360px_1fr] gap-6">
-      <Card>
-        <CardHeader title="Add Item" subtitle="Tags follow ability syntax." />
-        <div className="space-y-3">
-          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input placeholder="Tags (comma-separated)" value={tags} onChange={(e) => setTags(e.target.value)} />
-          <Button onClick={() => create.mutate({ name, tags: parseTags(tags) })}>Save</Button>
-        </div>
-      </Card>
-      <Card>
-        <CardHeader title="Items" subtitle="Pack items with tags." />
-        <div className="space-y-2">
-          {items.map((i) => (
-            <div key={i.id} className="border border-slate-100 rounded-xl p-3">
-              {editingId === i.id ? (
-                <div className="space-y-2">
-                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                  <Input value={editTags} onChange={(e) => setEditTags(e.target.value)} placeholder="Tags (comma-separated)" />
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => {
-                        update.mutate({ id: i.id, name: editName.trim(), tags: parseTags(editTags) });
-                        setEditingId(null);
-                      }}
-                      type="button"
-                    >
-                      Save
-                    </Button>
-                    <Button onClick={() => setEditingId(null)} type="button">
-                      Cancel
-                    </Button>
-                  </div>
+    return (
+        <div className="grid lg:grid-cols-[360px_1fr] gap-6">
+            <Card>
+                <CardHeader title="Add Item" subtitle="Tags follow ability syntax." />
+                <div className="space-y-3">
+                    <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+                    <Input
+                        placeholder="Tags (comma-separated)"
+                        value={tags}
+                        onChange={(e) => setTags(e.target.value)}
+                    />
+                    <Button onClick={() => create.mutate({ name, tags: parseTags(tags) })}>Save</Button>
+                    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                        <div className="font-semibold text-slate-600 mb-1">Available tag patterns</div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <span className="rounded-md bg-white px-2 py-1">mult:stat:multiplier</span>
+                            <span className="rounded-md bg-white px-2 py-1">immune:type</span>
+                            <span className="rounded-md bg-white px-2 py-1">resist:type</span>
+                            <span className="rounded-md bg-white px-2 py-1">weak:type</span>
+                            <span className="rounded-md bg-white px-2 py-1">evolution:item</span>
+                            <span className="rounded-md bg-white px-2 py-1">evolution:stone</span>
+                            <span className="rounded-md bg-white px-2 py-1">species:name</span>
+                            <span className="rounded-md bg-white px-2 py-1">crit:chance:+N</span>
+                            <span className="rounded-md bg-white px-2 py-1">crit:damage:xN</span>
+                            <span className="rounded-md bg-white px-2 py-1">crit:stage:+N</span>
+                        </div>
+                    </div>
                 </div>
-              ) : (
-                <>
-                  <div className="font-medium">{i.name}</div>
-                  <div className="text-xs text-slate-500 mt-1">{i.tags}</div>
-                  <div className="flex gap-2 mt-2">
-                    <Button
-                      onClick={() => {
-                        setEditingId(i.id);
-                        setEditName(i.name);
-                        setEditTags(parseStoredTags(i.tags).join(", "));
-                      }}
-                      type="button"
-                    >
-                      Edit
-                    </Button>
-                    <Button onClick={() => remove.mutate(i.id)} type="button">
-                      Delete
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
+            </Card>
+            <Card>
+                <CardHeader title="Items" subtitle="Pack items with tags." />
+                <div className="space-y-2">
+                    {items.map((i) => (
+                        <div key={i.id} className="border border-slate-100 rounded-xl p-3">
+                            {editingId === i.id ? (
+                                <div className="space-y-2">
+                                    <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                                    <Input
+                                        value={editTags}
+                                        onChange={(e) => setEditTags(e.target.value)}
+                                        placeholder="Tags (comma-separated)"
+                                    />
+                                    <div className="flex gap-2">
+                                        <Button
+                                            onClick={() => {
+                                                update.mutate({
+                                                    id: i.id,
+                                                    name: editName.trim(),
+                                                    tags: parseTags(editTags),
+                                                });
+                                                setEditingId(null);
+                                            }}
+                                            type="button"
+                                        >
+                                            Save
+                                        </Button>
+                                        <Button onClick={() => setEditingId(null)} type="button">
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="font-medium">{i.name}</div>
+                                    <div className="text-xs text-slate-500 mt-1">{i.tags}</div>
+                                    <div className="flex gap-2 mt-2">
+                                        <Button
+                                            onClick={() => {
+                                                setEditingId(i.id);
+                                                setEditName(i.name);
+                                                setEditTags(parseStoredTags(i.tags).join(", "));
+                                            }}
+                                            type="button"
+                                        >
+                                            Edit
+                                        </Button>
+                                        <Button onClick={() => remove.mutate(i.id)} type="button">
+                                            Delete
+                                        </Button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </Card>
         </div>
-      </Card>
-    </div>
-  );
+    );
 }

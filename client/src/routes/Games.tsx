@@ -12,7 +12,9 @@ const schema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
   disableAbilities: z.boolean().optional(),
-  disableHeldItems: z.boolean().optional()
+  disableHeldItems: z.boolean().optional(),
+  critStagePreset: z.enum(["gen2", "gen3_5", "gen6", "gen7"]).optional(),
+  critBaseDamageMult: z.coerce.number().min(0).optional()
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -28,7 +30,9 @@ export default function Games() {
       name: "",
       notes: "",
       disableAbilities: false,
-      disableHeldItems: false
+      disableHeldItems: false,
+      critStagePreset: "gen7",
+      critBaseDamageMult: 1.5
     }
   });
 
@@ -66,6 +70,8 @@ export default function Games() {
   const [editNotes, setEditNotes] = useState("");
   const [editDisableAbilities, setEditDisableAbilities] = useState(false);
   const [editDisableHeldItems, setEditDisableHeldItems] = useState(false);
+  const [editCritStagePreset, setEditCritStagePreset] = useState<"gen2" | "gen3_5" | "gen6" | "gen7">("gen7");
+  const [editCritBaseDamageMult, setEditCritBaseDamageMult] = useState(1.5);
 
   const availablePacks = useMemo(
     () => packs.filter((pack) => !selectedPackIds.includes(pack.id)),
@@ -169,6 +175,20 @@ export default function Games() {
             <input type="checkbox" {...form.register("disableHeldItems")} />
             Disable Held Items
           </label>
+          <div className="grid gap-2 md:grid-cols-2">
+            <Select {...form.register("critStagePreset")}>
+              <option value="gen2">Crit Stages: Gen II</option>
+              <option value="gen3_5">Crit Stages: Gen III–V</option>
+              <option value="gen6">Crit Stages: Gen VI</option>
+              <option value="gen7">Crit Stages: Gen VII+</option>
+            </Select>
+            <Input
+              type="number"
+              step="0.01"
+              placeholder="Crit Base Damage Mult"
+              {...form.register("critBaseDamageMult", { valueAsNumber: true })}
+            />
+          </div>
           <Button type="submit" disabled={selectedPackIds.length === 0}>
             Create
           </Button>
@@ -199,6 +219,24 @@ export default function Games() {
                     />
                     Disable Held Items
                   </label>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <Select
+                      value={editCritStagePreset}
+                      onChange={(e) => setEditCritStagePreset(e.target.value as "gen2" | "gen3_5" | "gen6" | "gen7")}
+                    >
+                      <option value="gen2">Crit Stages: Gen II</option>
+                      <option value="gen3_5">Crit Stages: Gen III–V</option>
+                      <option value="gen6">Crit Stages: Gen VI</option>
+                      <option value="gen7">Crit Stages: Gen VII+</option>
+                    </Select>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={editCritBaseDamageMult}
+                      onChange={(e) => setEditCritBaseDamageMult(Number(e.target.value))}
+                      placeholder="Crit Base Damage Mult"
+                    />
+                  </div>
                   <div className="flex gap-2 text-sm">
                     <Button
                       onClick={() => {
@@ -208,7 +246,9 @@ export default function Games() {
                             name: editName.trim(),
                             notes: editNotes.trim() || null,
                             disableAbilities: editDisableAbilities,
-                            disableHeldItems: editDisableHeldItems
+                            disableHeldItems: editDisableHeldItems,
+                            critStagePreset: editCritStagePreset,
+                            critBaseDamageMult: editCritBaseDamageMult
                           }
                         });
                         setEditingId(null);
@@ -251,6 +291,8 @@ export default function Games() {
                         setEditNotes(game.notes ?? "");
                         setEditDisableAbilities(game.disableAbilities);
                         setEditDisableHeldItems(game.disableHeldItems);
+                        setEditCritStagePreset(game.critStagePreset ?? "gen7");
+                        setEditCritBaseDamageMult(game.critBaseDamageMult ?? 1.5);
                       }}
                       type="button"
                     >

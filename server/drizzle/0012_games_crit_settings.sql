@@ -1,0 +1,1 @@
+ALTER TABLE games ADD COLUMN crit_base_chance real NOT NULL DEFAULT 0.0416666667;

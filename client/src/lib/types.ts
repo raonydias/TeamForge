@@ -82,6 +82,9 @@ export type GameRow = {
   notes: string | null;
   disableAbilities: boolean;
   disableHeldItems: boolean;
+  critStagePreset?: "gen2" | "gen3_5" | "gen6" | "gen7";
+  critBaseChance?: number;
+  critBaseDamageMult?: number;
   useSingleSpecial?: boolean;
 };
 
@@ -172,6 +175,10 @@ export type BoxRow = {
     defense: number;
     boxRank: number;
     balanceInvalid: boolean;
+    critExpectedMult: number;
+    critChance: number;
+    critDamageMult: number;
+    critTagsApplied: boolean;
   };
 };
 

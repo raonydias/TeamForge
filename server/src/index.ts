@@ -166,14 +166,18 @@ const gameCreateSchema = z.object({
   notes: z.string().optional().nullable(),
   packIds: z.array(idSchema).min(1),
   disableAbilities: z.boolean().optional().nullable(),
-  disableHeldItems: z.boolean().optional().nullable()
+  disableHeldItems: z.boolean().optional().nullable(),
+  critStagePreset: z.enum(["gen2", "gen3_5", "gen6", "gen7"]).optional().nullable(),
+  critBaseDamageMult: z.coerce.number().min(0).optional().nullable()
 });
 
 const gameUpdateSchema = z.object({
   name: z.string().min(1),
   notes: z.string().optional().nullable(),
   disableAbilities: z.boolean().optional().nullable(),
-  disableHeldItems: z.boolean().optional().nullable()
+  disableHeldItems: z.boolean().optional().nullable(),
+  critStagePreset: z.enum(["gen2", "gen3_5", "gen6", "gen7"]).optional().nullable(),
+  critBaseDamageMult: z.coerce.number().min(0).optional().nullable()
 });
 
 const allowedSchema = z.object({
@@ -1699,7 +1703,9 @@ app.post("/api/games", async (req, res) => {
         name: data.name,
         notes: data.notes ?? null,
         disableAbilities: data.disableAbilities ? 1 : 0,
-        disableHeldItems: data.disableHeldItems ? 1 : 0
+        disableHeldItems: data.disableHeldItems ? 1 : 0,
+        critStagePreset: data.critStagePreset ?? "gen7",
+        critBaseDamageMult: data.critBaseDamageMult ?? 1.5
       })
       .returning()
       .get();
@@ -1729,7 +1735,9 @@ app.put("/api/games/:id", async (req, res) => {
       name: data.name,
       notes: data.notes ?? null,
       disableAbilities: data.disableAbilities ? 1 : 0,
-      disableHeldItems: data.disableHeldItems ? 1 : 0
+      disableHeldItems: data.disableHeldItems ? 1 : 0,
+      critStagePreset: data.critStagePreset ?? "gen7",
+      critBaseDamageMult: data.critBaseDamageMult ?? 1.5
     })
     .where(eq(games.id, id))
     .returning();
@@ -1955,6 +1963,8 @@ app.get("/api/games/:id/box", async (req, res) => {
   if (game.length === 0) return res.status(404).json({ error: "Game not found" });
   const disableAbilities = !!game[0].disableAbilities;
   const disableHeldItems = !!game[0].disableHeldItems;
+  const critStagePreset = game[0].critStagePreset ?? "gen7";
+  const critBaseDamageMult = game[0].critBaseDamageMult ?? 1.5;
   const useSingleSpecial = await getGameUseSingleSpecial(gameId);
 
   const typesList = await db.select().from(gameTypes).where(eq(gameTypes.gameId, gameId));
@@ -2017,7 +2027,9 @@ app.get("/api/games/:id/box", async (req, res) => {
         attackingTypeId: r.attackingTypeId,
         defendingTypeId: r.defendingTypeId,
         multiplier: r.multiplier
-      }))
+      })),
+      critStagePreset,
+      critBaseDamageMult
     );
 
     return {

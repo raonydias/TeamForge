@@ -141,7 +141,10 @@ export const games = sqliteTable(
     name: text("name").notNull(),
     notes: text("notes"),
     disableAbilities: integer("disable_abilities").notNull().default(0),
-    disableHeldItems: integer("disable_held_items").notNull().default(0)
+    disableHeldItems: integer("disable_held_items").notNull().default(0),
+    critStagePreset: text("crit_stage_preset").notNull().default("gen7"),
+    critBaseChance: real("crit_base_chance").notNull().default(1 / 24),
+    critBaseDamageMult: real("crit_base_damage_mult").notNull().default(1.5)
   },
   (t) => ({
     nameIdx: uniqueIndex("games_name_idx").on(t.name)

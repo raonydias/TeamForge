@@ -16,6 +16,11 @@ export type Potentials = {
   defense: number;
   boxRank: number;
   balanceInvalid: boolean;
+  critExpectedMult: number;
+  critChance: number;
+  critDamageMult: number;
+  critStage: number;
+  critTagsApplied: boolean;
 };
 
 export type TypeChartRow = {
@@ -96,7 +101,10 @@ export function computePotentials(
   type1Id: number,
   type2Id: number | null,
   typesList: TypeInfo[],
-  chartRows: TypeChartRow[]
+  chartRows: TypeChartRow[],
+  critStagePreset: string,
+  critBaseDamageMult: number,
+  critBaseChance?: number
 ): Potentials {
   const adjusted = applyStatMultipliers(stats, tags);
 
@@ -142,8 +150,9 @@ export function computePotentials(
   const stabCov = Math.pow(avgStab, 1 / scoringDefaults.stabPower);
   const stabAdj = Math.pow(stabCov, scoringDefaults.stabExponent);
 
-  const offensivePhysical = baseOffPhys * stabAdj;
-  const offensiveSpecial = baseOffSpec * stabAdj;
+  const critInfo = computeCritExpectedMult(tags, critStagePreset, critBaseDamageMult, critBaseChance);
+  const offensivePhysical = baseOffPhys * stabAdj * critInfo.expectedMult;
+  const offensiveSpecial = baseOffSpec * stabAdj * critInfo.expectedMult;
   const defensivePhysical = bulkPhys * typeDefAdj;
   const defensiveSpecial = bulkSpec * typeDefAdj;
 
@@ -164,7 +173,12 @@ export function computePotentials(
     offense: off,
     defense: def,
     boxRank,
-    balanceInvalid
+    balanceInvalid,
+    critExpectedMult: critInfo.expectedMult,
+    critChance: critInfo.chance,
+    critDamageMult: critInfo.damageMult,
+    critStage: critInfo.stage,
+    critTagsApplied: critInfo.tagsApplied
   };
 }
 
@@ -180,6 +194,69 @@ function tagMultiplierForType(tags: string[], typeName: string) {
     if (kind === "weak") multiplier *= 2;
   }
   return multiplier;
+}
+
+const critStagePresets: Record<string, number[]> = {
+  gen2: [17 / 256, 1 / 8, 1 / 4, 85 / 256, 1 / 2],
+  gen3_5: [1 / 16, 1 / 8, 1 / 4, 1 / 3, 1 / 2],
+  gen6: [1 / 16, 1 / 8, 1 / 2, 1],
+  gen7: [1 / 24, 1 / 8, 1 / 2, 1]
+};
+
+function computeCritExpectedMult(
+  tags: string[],
+  presetKey: string,
+  baseDamageMult: number,
+  fallbackBaseChance?: number
+) {
+  let chanceBonus = 0;
+  let damageBonusMult = 1;
+  let stageBonus = 0;
+  let tagsApplied = false;
+
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+    if (!tag.toLowerCase().startsWith("crit:")) continue;
+    const parts = tag.split(":");
+    if (parts.length !== 3) continue;
+    const kind = parts[1]?.toLowerCase();
+    const value = parts[2]?.trim();
+    if (!value) continue;
+    if (kind === "chance") {
+      const normalized = value.startsWith("+") ? value.slice(1) : value;
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed)) {
+        chanceBonus += parsed;
+        tagsApplied = true;
+      }
+    }
+    if (kind === "damage") {
+      const normalized = value.startsWith("x") || value.startsWith("X") ? value.slice(1) : value;
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed)) {
+        damageBonusMult *= parsed;
+        tagsApplied = true;
+      }
+    }
+    if (kind === "stage") {
+      const normalized = value.startsWith("+") ? value.slice(1) : value;
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed)) {
+        stageBonus += parsed;
+        tagsApplied = true;
+      }
+    }
+  }
+
+  const preset = critStagePresets[presetKey] ?? critStagePresets.gen7;
+  const maxStage = Math.max(0, preset.length - 1);
+  const stage = Math.max(0, Math.min(maxStage, Math.floor(stageBonus)));
+  const baseChance = preset[stage] ?? fallbackBaseChance ?? 1 / 24;
+  const chance = Math.max(0, Math.min(1, baseChance + chanceBonus));
+  const damageMult = baseDamageMult * damageBonusMult;
+  const expectedMult = 1 + chance * (damageMult - 1);
+
+  return { chance, damageMult, expectedMult, tagsApplied, stage };
 }
 
 export function computeTeamChart(

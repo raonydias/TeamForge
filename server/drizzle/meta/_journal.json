@@ -73,6 +73,24 @@
       "version": "0011",
       "when": 1700000000011,
       "tag": "0011_pack_imports"
+    },
+    {
+      "idx": 12,
+      "version": "0012",
+      "when": 1700000000012,
+      "tag": "0012_games_crit_settings"
+    },
+    {
+      "idx": 13,
+      "version": "0013",
+      "when": 1700000000013,
+      "tag": "0013_games_crit_damage"
+    },
+    {
+      "idx": 14,
+      "version": "0014",
+      "when": 1700000000014,
+      "tag": "0014_games_crit_stage_preset"
     }
   ]
 }
