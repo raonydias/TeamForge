@@ -23,7 +23,7 @@ function parseStoredTags(raw: string) {
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {
     return raw
-      .split(",")
+      .split(/[;,]/)
       .map((t) => t.trim())
       .filter(Boolean);
   }
@@ -138,7 +138,6 @@ export default function GameBox() {
   const allowedSpeciesList = species.filter((s) => allowedSpecies.includes(s.id));
   const allowedAbilitiesList = abilities.filter((a) => allowedAbilities.includes(a.id));
   const allowedItemsList = items.filter((i) => allowedItems.includes(i.id));
-  const usableItems = allowedItemsList.filter((i) => !parseStoredTags(i.tags).some((t) => t.startsWith("evolution:")));
 
   const [form, setForm] = useState({
     speciesId: allowedSpeciesList[0]?.id ?? 0,
@@ -148,6 +147,26 @@ export default function GameBox() {
   });
   const [speciesQuery, setSpeciesQuery] = useState("");
   const [speciesTouched, setSpeciesTouched] = useState(false);
+
+  const selectedSpeciesName = useMemo(() => {
+    return allowedSpeciesList.find((s) => s.id === Number(form.speciesId))?.name ?? "";
+  }, [allowedSpeciesList, form.speciesId]);
+
+  const usableItems = useMemo(() => {
+    return allowedItemsList.filter((item) => {
+      const tags = parseStoredTags(item.tags);
+      const evolutionTags = tags.filter((t) => t.startsWith("evolution:"));
+      const nonEvolutionTags = tags.filter((t) => !t.startsWith("evolution:"));
+      if (evolutionTags.length > 0 && nonEvolutionTags.length === 0) return false;
+      const speciesTags = tags
+        .filter((t) => t.startsWith("species:"))
+        .map((t) => t.slice("species:".length).trim())
+        .filter(Boolean);
+      if (speciesTags.length === 0) return true;
+      if (!selectedSpeciesName) return false;
+      return speciesTags.some((tag) => tag.toLowerCase() === selectedSpeciesName.toLowerCase());
+    });
+  }, [allowedItemsList, selectedSpeciesName]);
 
   useEffect(() => {
     if (speciesTouched) return;

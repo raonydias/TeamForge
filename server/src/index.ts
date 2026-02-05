@@ -308,6 +308,72 @@ async function getGameUseSingleSpecial(gameId: number) {
   return rows.length > 0 ? !!rows[0].useSingleSpecial : false;
 }
 
+async function syncGameItems(gameId: number) {
+  const packRows = await db
+    .select({ packId: gamePacks.packId })
+    .from(gamePacks)
+    .where(eq(gamePacks.gameId, gameId))
+    .orderBy(gamePacks.sortOrder);
+  const packIds = packRows.map((row) => row.packId);
+  if (packIds.length === 0) return;
+
+  const importCache = new Map<number, number[]>();
+  const importChains = new Map<number, number[]>();
+  for (const packId of packIds) {
+    const chain = await getPackImportChainAsync(packId, importCache, new Set<number>());
+    importChains.set(packId, chain);
+  }
+
+  const sourcePackIds = Array.from(
+    new Set(packIds.flatMap((packId) => [...(importChains.get(packId) ?? []), packId]))
+  );
+  const packItemsRows = sourcePackIds.length
+    ? await db.select().from(packItems).where(inArray(packItems.packId, sourcePackIds))
+    : [];
+  const packItemsByPack = new Map<number, typeof packItemsRows>();
+  for (const row of packItemsRows) {
+    if (!packItemsByPack.has(row.packId)) packItemsByPack.set(row.packId, []);
+    packItemsByPack.get(row.packId)!.push(row);
+  }
+
+  const resolvedItems = new Map<string, { name: string; tags: string }>();
+  for (const packId of packIds) {
+    const itemEffective = new Map<string, { name: string; tags: string }>();
+    for (const importPackId of importChains.get(packId) ?? []) {
+      for (const row of packItemsByPack.get(importPackId) ?? []) {
+        itemEffective.set(normalizeKey(row.name), { name: row.name, tags: row.tags ?? "[]" });
+      }
+    }
+    for (const row of packItemsByPack.get(packId) ?? []) {
+      itemEffective.set(normalizeKey(row.name), { name: row.name, tags: row.tags ?? "[]" });
+    }
+    for (const [key, row] of itemEffective.entries()) {
+      resolvedItems.set(key, row);
+    }
+  }
+
+  const existing = await db.select().from(gameItems).where(eq(gameItems.gameId, gameId));
+  const existingByKey = new Map(existing.map((row) => [normalizeKey(row.name), row]));
+
+  for (const [key, row] of resolvedItems.entries()) {
+    const current = existingByKey.get(key);
+    if (!current) {
+      await db
+        .insert(gameItems)
+        .values({ gameId, name: row.name, tags: row.tags ?? "[]" })
+        .run();
+      continue;
+    }
+    if (current.name !== row.name || current.tags !== row.tags) {
+      await db
+        .update(gameItems)
+        .set({ name: row.name, tags: row.tags ?? "[]" })
+        .where(eq(gameItems.id, current.id))
+        .run();
+    }
+  }
+}
+
 function buildGameData(tx: any, gameId: number, packIds: number[]) {
   const packTypesRows = tx.select().from(packTypes).where(inArray(packTypes.packId, packIds)).all();
 
@@ -1783,6 +1849,7 @@ app.get("/api/games/:id/abilities", async (req, res) => {
 
 app.get("/api/games/:id/items", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
+  await syncGameItems(gameId);
   const rows = await db.select().from(gameItems).where(eq(gameItems.gameId, gameId)).orderBy(gameItems.name);
   res.json(rows);
 });
