@@ -170,21 +170,21 @@ export default function GameBox() {
 
   useEffect(() => {
     if (speciesTouched) return;
-    if (form.speciesId === 0 && allowedSpeciesList.length > 0) {
+    if (!speciesQuery.trim() && form.speciesId === 0 && allowedSpeciesList.length > 0) {
       setForm((prev) => ({ ...prev, speciesId: allowedSpeciesList[0].id }));
     }
-  }, [allowedSpeciesList, form.speciesId, speciesTouched]);
+  }, [allowedSpeciesList, form.speciesId, speciesQuery, speciesTouched]);
 
   useEffect(() => {
     if (speciesTouched) return;
     const selected = allowedSpeciesList.find((s) => s.id === form.speciesId);
     if (selected) {
       setSpeciesQuery(selected.name);
-    } else if (allowedSpeciesList.length > 0) {
+    } else if (!speciesQuery.trim() && allowedSpeciesList.length > 0) {
       setForm((prev) => ({ ...prev, speciesId: allowedSpeciesList[0].id }));
       setSpeciesQuery(allowedSpeciesList[0].name);
     }
-  }, [allowedSpeciesList, form.speciesId, speciesTouched]);
+  }, [allowedSpeciesList, form.speciesId, speciesQuery, speciesTouched]);
 
   const speciesAbilityIds = speciesAbilities
     .filter((row) => row.speciesId === Number(form.speciesId))
@@ -718,12 +718,17 @@ export default function GameBox() {
               }}
               onFocus={() => setSpeciesTouched(true)}
               onBlur={() => {
-                const selected = allowedSpeciesList.find((s) => s.id === form.speciesId);
-                if (selected) {
-                  setSpeciesQuery(selected.name);
-                } else if (!speciesQuery.trim()) {
+                if (!speciesQuery.trim()) {
                   setForm((f) => ({ ...f, speciesId: 0 }));
                   setSpeciesQuery("");
+                  return;
+                }
+                const match = allowedSpeciesList.find((s) => s.name.toLowerCase() === speciesQuery.trim().toLowerCase());
+                if (match) {
+                  setForm((f) => ({ ...f, speciesId: match.id }));
+                  setSpeciesQuery(match.name);
+                } else {
+                  setForm((f) => ({ ...f, speciesId: 0 }));
                 }
               }}
             />

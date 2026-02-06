@@ -30,9 +30,7 @@ import {
   boxPokemon,
   trackedBox,
   teamSlots,
-  settings
 } from "./db/schema.js";
-import { seedIfEmpty } from "./db/seed.js";
 import { computePotentials, computeTeamChart, computeDefenseMatrix, parseTags } from "./scoring.js";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
@@ -44,8 +42,6 @@ app.use(express.json());
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = resolve(__dirname, "..", "drizzle");
 migrate(db, { migrationsFolder });
-
-await seedIfEmpty();
 
 const idSchema = z.coerce.number().int().positive();
 
@@ -374,6 +370,165 @@ async function syncGameItems(gameId: number) {
         .set({ name: row.name, tags: row.tags ?? "[]" })
         .where(eq(gameItems.id, current.id))
         .run();
+    }
+  }
+}
+
+async function syncGameSpeciesAbilities(gameId: number) {
+  await syncGameAbilities(gameId);
+  const packRows = await db
+    .select({ packId: gamePacks.packId })
+    .from(gamePacks)
+    .where(eq(gamePacks.gameId, gameId))
+    .orderBy(gamePacks.sortOrder);
+  const packIds = packRows.map((row) => row.packId);
+  if (packIds.length === 0) return;
+
+  const importCache = new Map<number, number[]>();
+  const importChains = new Map<number, number[]>();
+  for (const packId of packIds) {
+    const chain = await getPackImportChainAsync(packId, importCache, new Set<number>());
+    importChains.set(packId, chain);
+  }
+
+  const sourcePackIds = Array.from(
+    new Set(packIds.flatMap((packId) => [...(importChains.get(packId) ?? []), packId]))
+  );
+
+  const packSpeciesRows = await db.select().from(packSpecies).where(inArray(packSpecies.packId, packIds));
+  const packAbilitiesRows = sourcePackIds.length
+    ? await db.select().from(packAbilities).where(inArray(packAbilities.packId, sourcePackIds))
+    : [];
+  const packSpeciesAbilitiesRows = await db
+    .select()
+    .from(packSpeciesAbilities)
+    .where(inArray(packSpeciesAbilities.packId, packIds));
+
+  const speciesNameByPackId = new Map<string, string>();
+  for (const row of packSpeciesRows) {
+    speciesNameByPackId.set(`${row.packId}:${row.id}`, row.name);
+  }
+
+  const abilityNameById = new Map<number, string>();
+  for (const row of packAbilitiesRows) {
+    abilityNameById.set(row.id, row.name);
+  }
+
+  const abilitiesByPack = new Map<number, Map<string, { abilityName: string; slot: string }[]>>();
+  for (const row of packSpeciesAbilitiesRows) {
+    const speciesName = speciesNameByPackId.get(`${row.packId}:${row.speciesId}`);
+    const abilityName = abilityNameById.get(row.abilityId);
+    if (!speciesName || !abilityName) continue;
+    if (!abilitiesByPack.has(row.packId)) abilitiesByPack.set(row.packId, new Map());
+    const bySpecies = abilitiesByPack.get(row.packId)!;
+    if (!bySpecies.has(speciesName)) bySpecies.set(speciesName, []);
+    bySpecies.get(speciesName)!.push({ abilityName, slot: row.slot });
+  }
+
+  const resolved = new Map<string, { abilityName: string; slot: string }[]>();
+  for (const packId of packIds) {
+    const bySpecies = abilitiesByPack.get(packId);
+    if (!bySpecies) continue;
+    for (const [speciesName, entries] of bySpecies.entries()) {
+      resolved.set(speciesName, entries);
+    }
+  }
+
+  const gameSpeciesRows = await db.select().from(gameSpecies).where(eq(gameSpecies.gameId, gameId));
+  const gameAbilitiesRows = await db.select().from(gameAbilities).where(eq(gameAbilities.gameId, gameId));
+
+  const gameSpeciesByName = new Map(gameSpeciesRows.map((row) => [normalizeKey(row.name), row.id]));
+  const gameAbilitiesByName = new Map(gameAbilitiesRows.map((row) => [normalizeKey(row.name), row.id]));
+
+  await db.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.gameId, gameId));
+
+  for (const [speciesName, entries] of resolved.entries()) {
+    const speciesId = gameSpeciesByName.get(normalizeKey(speciesName));
+    if (!speciesId) continue;
+    for (const entry of entries) {
+      const abilityId = gameAbilitiesByName.get(normalizeKey(entry.abilityName));
+      if (!abilityId) continue;
+      await db
+        .insert(gameSpeciesAbilities)
+        .values({ gameId, speciesId, abilityId, slot: entry.slot })
+        .run();
+    }
+  }
+}
+
+async function syncGameAbilities(gameId: number) {
+  const packRows = await db
+    .select({ packId: gamePacks.packId })
+    .from(gamePacks)
+    .where(eq(gamePacks.gameId, gameId))
+    .orderBy(gamePacks.sortOrder);
+  const packIds = packRows.map((row) => row.packId);
+  if (packIds.length === 0) return;
+
+  const importCache = new Map<number, number[]>();
+  const importChains = new Map<number, number[]>();
+  for (const packId of packIds) {
+    const chain = await getPackImportChainAsync(packId, importCache, new Set<number>());
+    importChains.set(packId, chain);
+  }
+
+  const sourcePackIds = Array.from(
+    new Set(packIds.flatMap((packId) => [...(importChains.get(packId) ?? []), packId]))
+  );
+  const packAbilitiesRows = sourcePackIds.length
+    ? await db.select().from(packAbilities).where(inArray(packAbilities.packId, sourcePackIds))
+    : [];
+  const packAbilitiesByPack = new Map<number, typeof packAbilitiesRows>();
+  for (const row of packAbilitiesRows) {
+    if (!packAbilitiesByPack.has(row.packId)) packAbilitiesByPack.set(row.packId, []);
+    packAbilitiesByPack.get(row.packId)!.push(row);
+  }
+
+  const resolvedAbilities = new Map<string, { name: string; tags: string }>();
+  for (const packId of packIds) {
+    const abilityEffective = new Map<string, { name: string; tags: string }>();
+    for (const importPackId of importChains.get(packId) ?? []) {
+      for (const row of packAbilitiesByPack.get(importPackId) ?? []) {
+        abilityEffective.set(normalizeKey(row.name), { name: row.name, tags: row.tags ?? "[]" });
+      }
+    }
+    for (const row of packAbilitiesByPack.get(packId) ?? []) {
+      abilityEffective.set(normalizeKey(row.name), { name: row.name, tags: row.tags ?? "[]" });
+    }
+    for (const [key, row] of abilityEffective.entries()) {
+      resolvedAbilities.set(key, row);
+    }
+  }
+
+  const allowedRows = await db
+    .select({ name: gameAbilities.name })
+    .from(gameAllowedAbilities)
+    .innerJoin(gameAbilities, eq(gameAllowedAbilities.abilityId, gameAbilities.id))
+    .where(eq(gameAllowedAbilities.gameId, gameId));
+  const allowedNames = new Set(allowedRows.map((row) => normalizeKey(row.name)));
+  const hadAllowed = allowedNames.size > 0;
+
+  await db.delete(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.gameId, gameId));
+  await db.delete(gameAllowedAbilities).where(eq(gameAllowedAbilities.gameId, gameId));
+  await db.delete(gameAbilities).where(eq(gameAbilities.gameId, gameId));
+
+  const insertValues = Array.from(resolvedAbilities.values()).map((row) => ({
+    gameId,
+    name: row.name,
+    tags: row.tags ?? "[]"
+  }));
+  const inserted =
+    insertValues.length > 0 ? await db.insert(gameAbilities).values(insertValues).returning() : [];
+
+  if (hadAllowed && inserted.length > 0) {
+    const idByName = new Map(inserted.map((row) => [normalizeKey(row.name), row.id]));
+    const allowedIds = Array.from(allowedNames)
+      .map((name) => idByName.get(name))
+      .filter((id): id is number => typeof id === "number");
+    if (allowedIds.length > 0) {
+      await db
+        .insert(gameAllowedAbilities)
+        .values(allowedIds.map((abilityId) => ({ gameId, abilityId })));
     }
   }
 }
@@ -1792,6 +1947,7 @@ app.put("/api/games/:id/allowed-species", async (req, res) => {
 
 app.get("/api/games/:id/allowed-abilities", async (req, res) => {
   const id = idSchema.parse(req.params.id);
+  await syncGameAbilities(id);
   const rows = await db.select().from(gameAllowedAbilities).where(eq(gameAllowedAbilities.gameId, id));
   res.json(rows.map((r) => r.abilityId));
 });
@@ -1851,6 +2007,7 @@ app.get("/api/games/:id/species", async (req, res) => {
 
 app.get("/api/games/:id/abilities", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
+  await syncGameAbilities(gameId);
   const rows = await db.select().from(gameAbilities).where(eq(gameAbilities.gameId, gameId)).orderBy(gameAbilities.name);
   res.json(rows);
 });
@@ -1864,6 +2021,7 @@ app.get("/api/games/:id/items", async (req, res) => {
 
 app.get("/api/games/:id/species-abilities", async (req, res) => {
   const gameId = idSchema.parse(req.params.id);
+  await syncGameSpeciesAbilities(gameId);
   const rows = await db.select().from(gameSpeciesAbilities).where(eq(gameSpeciesAbilities.gameId, gameId));
   res.json(rows);
 });
